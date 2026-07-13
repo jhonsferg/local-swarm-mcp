@@ -1,0 +1,7 @@
+/local-swarm-mcp
+/local-swarm-mcp.exe
+/dist/
+*.db
+config.yaml
+.idea/
+.vscode/
