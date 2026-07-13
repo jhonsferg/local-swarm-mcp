@@ -341,6 +341,42 @@ store, so treat it like any other network-exposed service.
 `-insecure-no-auth` is only reasonable on a network you fully trust and
 isolate (e.g. a home LAN with no other untrusted devices).
 
+### 🛰️ Host discovery - add inference hardware without editing config or restarting
+
+Once running with `-transport http`, local-swarm-mcp becomes a small
+service-discovery daemon for your inference hosts: register a host once
+(a desktop GPU, a DGX Spark, an AMD AI box - anything speaking Ollama's
+API) and it's polled in the background forever after. New models pulled
+on that host show up automatically as `<host>/<model>` backends - no
+YAML/JSON edit, no client restart.
+
+```
+local-swarm-mcp -register-host -name rx9070 -host-base-url http://192.168.18.29:11434
+```
+
+- If a daemon is already running at the default address, this is a thin
+  HTTP client: it forwards the registration and exits.
+- If no daemon is running yet, this invocation *becomes* the daemon (same
+  process, same leader-election mechanism `-transport http` normally goes
+  through) and keeps the registration.
+
+Exactly one process ever wins: every invocation probes `-http-addr` first,
+and if nothing answers there, falls back to a PID lockfile
+(`<user cache dir>/local-swarm-mcp/daemon.lock`) with a health check as a
+second, independent confirmation - a stale lock from a crashed daemon is
+reclaimed automatically (its PID is checked for liveness), but a live PID
+that isn't actually answering as a real local-swarm-mcp daemon is
+reported as a genuine conflict rather than silently overridden.
+
+The same operations are also available as MCP tools
+(`register_backend_host`, `unregister_backend_host`,
+`list_backend_hosts`) so an agent - or you, through your MCP client - can
+manage hosts directly over the existing connection. `list_backend_hosts`
+reports whether each host is currently reachable (`up`), so you (or an
+agent orchestrating work) can tell a host that's merely registered but
+powered off from one that's actually available before dispatching a task
+to it.
+
 ## 🧰 Tools
 
 ### 🔗 Backends
@@ -348,6 +384,13 @@ isolate (e.g. a home LAN with no other untrusted devices).
 |---|---|
 | `list_backends` | List configured backends (name, base_url, model) |
 | `health_check` | Probe reachability of one backend, or all if omitted |
+
+### 🛰️ Host discovery (only when running with `-transport http`)
+| Tool | Purpose |
+|---|---|
+| `register_backend_host` | Register a new inference host for background model discovery |
+| `unregister_backend_host` | Remove a registered host and stop polling it |
+| `list_backend_hosts` | List registered hosts, whether each is currently reachable, and the models discovered on it |
 
 ### ⚡ One-shot delegation
 | Tool | Purpose |
@@ -439,10 +482,11 @@ drop `-race` for local runs - CI still runs it on all three OSes.
 
 ## 📌 Status
 
-v0.3 - core delegation, task orchestration, sessions, context tools, and
-tool-using agents are all in place, and the project now has a real release
-pipeline. Verified end-to-end over stdio against a real Ollama backend on
-a 6GB-VRAM laptop GPU:
+v0.4 - core delegation, task orchestration, sessions, context tools,
+tool-using agents, a release pipeline, and multi-host inference discovery
+are all in place. Verified end-to-end over stdio and HTTP against real
+Ollama backends across two machines (a 6GB-VRAM laptop GPU and a
+16GB-VRAM desktop GPU on the same LAN):
 - v0.1: all 20 tools registered and responded correctly against `qwen2.5-coder:1.5b`,
   including a full spawn/wait task round-trip and a multi-turn session.
 - v0.2: a `spawn_agent_task` run against `llama3.1:8b`, with `codebase-memory-mcp`
@@ -452,6 +496,12 @@ a 6GB-VRAM laptop GPU:
 - v0.3: an auto-release pipeline (Conventional Commits bump detection,
   goreleaser) and one-line install scripts for Linux/macOS and Windows,
   both verified against real goreleaser-produced archives and checksums.
+- v0.4: `-register-host` against a real remote Ollama instance - both the
+  client path (an existing daemon forwards the registration) and the
+  daemon-election path (no daemon running yet, the invocation becomes
+  one) verified live; the background poller correctly discovered a
+  freshly-pulled model (`gemma4:12b`) on that host and made it callable
+  as `rx9070/gemma4:12b` without any config edit or restart.
 
 ## 📄 License
 
