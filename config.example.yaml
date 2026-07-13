@@ -1,0 +1,19 @@
+# Copy to your user config dir (see README) and adjust.
+#
+# Each backend just needs to speak the OpenAI-compatible /chat/completions
+# and /models endpoints - llama.cpp's llama-server, Ollama, vLLM, and most
+# hosted providers all do. The first entry is the default used when a tool
+# call omits "backend".
+
+backends:
+  - name: local-llama
+    base_url: http://localhost:8080/v1
+    model: qwen2.5-coder
+
+  - name: local-ollama
+    base_url: http://localhost:11434/v1
+    model: qwen2.5-coder:7b
+
+# Optional: where the scratch key-value store lives. Defaults to
+# <user cache dir>/local-swarm-mcp/scratch.db if omitted.
+# store_path: C:\Users\you\.cache\local-swarm-mcp\scratch.db
