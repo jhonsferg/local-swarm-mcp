@@ -5,7 +5,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/jhonsferg/local-swarm-mcp/internal/backend"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -25,11 +24,7 @@ func ListBackendsTool() mcp.Tool {
 
 // ListBackendsHandler returns the configured backends as JSON.
 func (b *Backends) ListBackendsHandler(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	out, err := json.Marshal(b.Registry.List())
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	return mcp.NewToolResultText(string(out)), nil
+	return jsonResult(b.Registry.List())
 }
 
 // HealthCheckTool returns the MCP tool definition for health_check.
@@ -57,9 +52,5 @@ func (b *Backends) HealthCheckHandler(ctx context.Context, req mcp.CallToolReque
 		targets = append(targets, backend.Check(ctx, cfg))
 	}
 
-	out, err := json.Marshal(targets)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	return mcp.NewToolResultText(string(out)), nil
+	return jsonResult(targets)
 }
