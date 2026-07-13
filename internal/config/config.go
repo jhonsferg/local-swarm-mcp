@@ -21,10 +21,21 @@ type Backend struct {
 	Model   string `yaml:"model" json:"model"`
 }
 
+// MCPServer describes a downstream MCP server whose tools can be made
+// available to tool-using agent tasks (see spawn_agent_task), spawned as a
+// local stdio subprocess the same way a client like Claude Code registers
+// one in its own .mcp.json.
+type MCPServer struct {
+	Name    string   `yaml:"name" json:"name"`
+	Command string   `yaml:"command" json:"command"`
+	Args    []string `yaml:"args,omitempty" json:"args,omitempty"`
+}
+
 // Config is the top-level local-swarm-mcp configuration.
 type Config struct {
-	Backends  []Backend `yaml:"backends" json:"backends"`
-	StorePath string    `yaml:"store_path,omitempty" json:"store_path,omitempty"`
+	Backends   []Backend   `yaml:"backends" json:"backends"`
+	MCPServers []MCPServer `yaml:"mcp_servers,omitempty" json:"mcp_servers,omitempty"`
+	StorePath  string      `yaml:"store_path,omitempty" json:"store_path,omitempty"`
 }
 
 // Load reads and parses a config file from path, auto-detecting YAML vs
