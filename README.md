@@ -463,6 +463,21 @@ real time, all without touching a config file or a terminal.
 | `delegate_task` | Send a task to a backend and block for the completion - the simple synchronous path |
 | `compact_context` | Summarize a block of text down to a target size via a backend, so it doesn't sit uncompacted in the client's own context |
 
+`delegate_task`, `spawn_task`, `send_message`, and `spawn_agent_task` all take
+the same three sampling parameters: `max_tokens`, `temperature`, `top_p`.
+Deliberately only these three - they're the ones the OpenAI
+chat-completions spec actually defines, so they're honored consistently
+whether the backend is llama.cpp, Ollama, vLLM, or a hosted provider.
+Ollama-specific knobs like `num_ctx` (context window size) or `top_k`
+aren't part of that spec: verified live, Ollama's OpenAI-compatible
+endpoint accepts them in an `options` object without erroring but
+silently ignores them, so they're not exposed here - a parameter that
+looks like it works but quietly doesn't would be worse than not having
+it. Tuning those for real currently means either building a derived
+model with `ollama create` and its own baked-in `PARAMETER num_ctx ...`,
+or calling the backend's native API directly rather than through
+local-swarm-mcp.
+
 ### 🎯 Background tasks (fire-and-forget, like spawning a subagent)
 | Tool | Purpose |
 |---|---|
