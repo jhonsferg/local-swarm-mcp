@@ -292,6 +292,16 @@ mcp_servers:
     command: /path/to/codebase-memory-mcp
 store_path: C:\Users\you\.cache\local-swarm-mcp\scratch.db
 ```
+
+⚠️ **This file auto-loads even if you never pass `-config`** - the flag's
+*default value* is that same `<user config dir>` path, so if it exists
+from an earlier setup, its `backends:` list gets loaded every time and
+sits alongside anything registered dynamically, permanently, since a
+static entry is never touched by the discovery poller (it isn't the
+poller's to manage). If you've moved to host discovery and still see an
+old model that no longer exists on some host, this file - not a bug in
+discovery - is almost certainly why: either delete it, or empty out its
+`backends:` list, and restart the daemon.
 </details>
 
 ## 🔌 Registering with an MCP client
