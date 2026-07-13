@@ -1,0 +1,20 @@
+{
+  "backends": [
+    {
+      "name": "local-llama",
+      "base_url": "http://localhost:8080/v1",
+      "model": "qwen2.5-coder"
+    },
+    {
+      "name": "local-ollama",
+      "base_url": "http://localhost:11434/v1",
+      "model": "qwen2.5-coder:7b"
+    }
+  ],
+  "mcp_servers": [
+    {
+      "name": "codebase-memory-mcp",
+      "command": "/path/to/codebase-memory-mcp"
+    }
+  ]
+}

@@ -14,6 +14,16 @@ backends:
     base_url: http://localhost:11434/v1
     model: qwen2.5-coder:7b
 
+# Optional: downstream MCP servers whose tools spawn_agent_task can invoke.
+# Each is spawned as a local stdio subprocess, the same way an MCP client
+# spawns local-swarm-mcp itself. Only matters if you use spawn_agent_task -
+# delegate_task, sessions, and the scratch store don't need this section.
+# Requires a tool-calling-capable backend model; see the README's model
+# support table (verified working: llama3.1:8b via Ollama).
+mcp_servers:
+  - name: codebase-memory-mcp
+    command: /path/to/codebase-memory-mcp
+
 # Optional: where the scratch key-value store lives. Defaults to
 # <user cache dir>/local-swarm-mcp/scratch.db if omitted.
 # store_path: C:\Users\you\.cache\local-swarm-mcp\scratch.db

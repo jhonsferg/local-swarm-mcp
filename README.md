@@ -184,12 +184,43 @@ Its OpenAI-compatible endpoint is `http://<host>:8080/v1`.
 `/v1/chat/completions` endpoint, also work - just point a backend entry
 at it.
 
-**2. Go 1.26 or newer**, to build local-swarm-mcp itself:
+**2. local-swarm-mcp itself** - either grab a release binary or build from
+source. See [Installing](#-installing) below.
+
+## 📦 Installing
+
+### Linux / macOS
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jhonsferg/local-swarm-mcp/main/install/install.sh | sh
 ```
+
+### Windows
+
+```powershell
+irm https://raw.githubusercontent.com/jhonsferg/local-swarm-mcp/main/install/install.ps1 | iex
+```
+
+Both scripts detect your OS/arch, download the matching release archive
+and its `checksums.txt`, verify the SHA-256 checksum, and install
+`local-swarm-mcp` (`.exe` on Windows) to `~/.local/bin` (Linux/macOS) or
+`%USERPROFILE%\.local\bin` (Windows). Set `LSM_INSTALL_DIR`/`LSM_VERSION`
+(`$env:LSM_INSTALL_DIR`/`$env:LSM_VERSION` on Windows) before piping to
+override the install location or pin a specific version instead of
+`latest`.
+
+Releases are built by [goreleaser](https://goreleaser.com) for
+`{linux,darwin,windows} x {amd64,arm64}` and published automatically on
+every merge to `main` whose commits since the last tag warrant a version
+bump (Conventional Commits: `feat:` -> minor, `fix:`/`perf:`/`refactor:`
+-> patch, `feat!:`/`BREAKING CHANGE` -> major). See [releases](https://github.com/jhonsferg/local-swarm-mcp/releases).
+
+### From source
+
+```sh
 go build -o local-swarm-mcp ./cmd/local-swarm-mcp
 ```
-(No prebuilt release binaries yet - this is a v0.1 project. If you add a
-release workflow later, update this section.)
+Requires Go 1.26 or newer.
 
 ## 🛠️ Configuring backends
 
@@ -408,15 +439,19 @@ drop `-race` for local runs - CI still runs it on all three OSes.
 
 ## 📌 Status
 
-v0.2 - core delegation, task orchestration, sessions, context tools, and
-tool-using agents are all in place. Verified end-to-end over stdio against
-a real Ollama backend on a 6GB-VRAM laptop GPU:
+v0.3 - core delegation, task orchestration, sessions, context tools, and
+tool-using agents are all in place, and the project now has a real release
+pipeline. Verified end-to-end over stdio against a real Ollama backend on
+a 6GB-VRAM laptop GPU:
 - v0.1: all 20 tools registered and responded correctly against `qwen2.5-coder:1.5b`,
   including a full spawn/wait task round-trip and a multi-turn session.
 - v0.2: a `spawn_agent_task` run against `llama3.1:8b`, with `codebase-memory-mcp`
   wired in as a downstream server, correctly called `index_repository` on
   this repo and reported the real result (288 nodes, 937 edges) rather than
   a hallucinated one, with the tool call recorded in the task's transcript.
+- v0.3: an auto-release pipeline (Conventional Commits bump detection,
+  goreleaser) and one-line install scripts for Linux/macOS and Windows,
+  both verified against real goreleaser-produced archives and checksums.
 
 ## 📄 License
 
