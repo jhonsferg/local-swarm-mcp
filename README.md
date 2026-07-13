@@ -5,7 +5,7 @@
   <a href="https://github.com/jhonsferg/local-swarm-mcp/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
   <img alt="Go" src="https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-compatible-6f42c1">
-  <img alt="Status" src="https://img.shields.io/badge/status-v0.1-orange">
+  <img alt="Status" src="https://img.shields.io/badge/status-v0.5-orange">
 </p>
 
 <p align="center">
@@ -13,6 +13,12 @@
   <img alt="llama.cpp" src="https://img.shields.io/badge/llama.cpp-supported-333333">
   <img alt="vLLM" src="https://img.shields.io/badge/vLLM-supported-4B8BBE">
   <img alt="OpenAI API" src="https://img.shields.io/badge/API-OpenAI--compatible-412991?logo=openai&logoColor=white">
+</p>
+
+<p align="center">
+  <img alt="Vue" src="https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white">
+  <img alt="Tailwind CSS" src="https://img.shields.io/badge/Tailwind-CSS-06B6D4?logo=tailwindcss&logoColor=white">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-built-646CFF?logo=vite&logoColor=white">
 </p>
 
 An MCP server that delegates mechanical, low-judgment tasks to local or
@@ -377,6 +383,33 @@ agent orchestrating work) can tell a host that's merely registered but
 powered off from one that's actually available before dispatching a task
 to it.
 
+### 🔌 Downstream MCP servers, dynamically
+
+The `mcp_servers:` config-file list works the same way it always has, but
+it's legacy now: `register_downstream_mcp_server` (and its
+`unregister_downstream_mcp_server` / `list_downstream_mcp_servers`
+counterparts) registers a server like `codebase-memory-mcp` at runtime -
+spawned and connected immediately, persisted so it reconnects
+automatically across daemon restarts, no config file or restart needed.
+The same three operations are also exposed over the admin HTTP surface
+(`POST /admin/register-mcp-server`, `POST /admin/unregister-mcp-server`,
+`GET /admin/mcp-servers`) and from the embedded dashboard below.
+
+## 📊 Dashboard
+
+```
+local-swarm-mcp -transport http -insecure-no-auth -ui
+```
+
+`-ui` serves an embedded dashboard at `/` (a small Vue app - see
+[`ui/`](ui/)) showing configured backends, registered inference hosts
+with live up/down status and discovered models, registered downstream
+MCP servers with live connected/disconnected status, and a live-streaming
+log tail. Everything on the page is a thin client over the same
+`/admin/*` endpoints described above - you can register or edit a host,
+register a downstream MCP server, or watch what the daemon is doing in
+real time, all without touching a config file or a terminal.
+
 ## 🧰 Tools
 
 ### 🔗 Backends
@@ -391,6 +424,13 @@ to it.
 | `register_backend_host` | Register a new inference host for background model discovery |
 | `unregister_backend_host` | Remove a registered host and stop polling it |
 | `list_backend_hosts` | List registered hosts, whether each is currently reachable, and the models discovered on it |
+
+### 🔌 Downstream MCP servers (only when running with `-transport http`)
+| Tool | Purpose |
+|---|---|
+| `register_downstream_mcp_server` | Register and connect a downstream MCP server (e.g. codebase-memory-mcp) at runtime |
+| `unregister_downstream_mcp_server` | Disconnect and remove a registered downstream MCP server |
+| `list_downstream_mcp_servers` | List registered downstream servers and whether each is currently connected |
 
 ### ⚡ One-shot delegation
 | Tool | Purpose |
@@ -480,13 +520,45 @@ go test ./... -race -covermode=atomic
 `-race` requires cgo (`CGO_ENABLED=1`); on a machine without a C toolchain,
 drop `-race` for local runs - CI still runs it on all three OSes.
 
+### Building the dashboard (`ui/`)
+
+The embedded dashboard is a separate Vue 3 + TypeScript + Tailwind
+project at [`ui/`](ui/), kept independent from the Go server so each side
+has its own fast test loop (`vitest` for UI components, `go test` for the
+server) instead of one slow, tangled one.
+
+```
+cd ui
+npm install
+npm run test     # vitest, component-level
+npm run build    # type-checks (vue-tsc) then builds straight into
+                  # ../internal/webui/dist, which cmd/local-swarm-mcp
+                  # embeds via go:embed
+```
+
+A minimal placeholder is committed at `internal/webui/dist` so a bare
+`go build ./...` never breaks on a fresh clone without Node installed -
+CI and goreleaser always run the real `npm run build` first (see the
+`ui` job in `.github/workflows/ci.yml` and the `before.hooks` in
+`.goreleaser.yml`), so release and CI-tested binaries always ship the
+actual dashboard, never that placeholder. If you edit anything under
+`ui/src`, run `npm run build` and commit the resulting change under
+`internal/webui/dist` too, so the placeholder stays reasonably fresh for
+everyone else's bare `go build`.
+
+For local frontend development against a running daemon, `npm run dev`
+starts Vite's dev server with `/admin` proxied to `http://localhost:8090`
+(see `ui/vite.config.ts`) - point it at a different `-http-addr` by
+editing that proxy target.
+
 ## 📌 Status
 
-v0.4 - core delegation, task orchestration, sessions, context tools,
-tool-using agents, a release pipeline, and multi-host inference discovery
-are all in place. Verified end-to-end over stdio and HTTP against real
-Ollama backends across two machines (a 6GB-VRAM laptop GPU and a
-16GB-VRAM desktop GPU on the same LAN):
+v0.5 - core delegation, task orchestration, sessions, context tools,
+tool-using agents, a release pipeline, multi-host inference discovery,
+dynamic downstream MCP server registration, structured logging, and an
+embedded dashboard are all in place. Verified end-to-end over stdio and
+HTTP against real Ollama backends across two machines (a 6GB-VRAM laptop
+GPU and a 16GB-VRAM desktop GPU on the same LAN):
 - v0.1: all 20 tools registered and responded correctly against `qwen2.5-coder:1.5b`,
   including a full spawn/wait task round-trip and a multi-turn session.
 - v0.2: a `spawn_agent_task` run against `llama3.1:8b`, with `codebase-memory-mcp`
@@ -502,6 +574,13 @@ Ollama backends across two machines (a 6GB-VRAM laptop GPU and a
   one) verified live; the background poller correctly discovered a
   freshly-pulled model (`gemma4:12b`) on that host and made it callable
   as `rx9070/gemma4:12b` without any config edit or restart.
+- v0.5: `-ui` verified live against a real daemon and a real remote host -
+  registering, editing, and removing a host and a downstream MCP server
+  from the dashboard all worked end-to-end through the `/admin/*`
+  endpoints, live log streaming (SSE) showed each action as it happened,
+  and a `goreleaser build --snapshot` produced a release binary that
+  served the real (non-placeholder) dashboard, confirming the whole
+  `ui/` → `internal/webui/dist` → `go:embed` pipeline works outside CI too.
 
 ## 📄 License
 
