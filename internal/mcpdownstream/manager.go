@@ -60,6 +60,35 @@ func (m *Manager) connectOne(ctx context.Context, srv config.MCPServer) error {
 	return m.Attach(ctx, srv.Name, c)
 }
 
+// ConnectOne connects a single downstream server at runtime - e.g. one
+// just registered dynamically, without a restart. Exported so registering
+// a new server doesn't need the whole batch Connect path.
+func (m *Manager) ConnectOne(ctx context.Context, srv config.MCPServer) error {
+	return m.connectOne(ctx, srv)
+}
+
+// Detach closes and forgets a downstream server's connection, if any.
+func (m *Manager) Detach(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if c, ok := m.clients[name]; ok {
+		_ = c.Close()
+		delete(m.clients, name)
+	}
+	delete(m.tools, name)
+}
+
+// Names returns the names of every currently connected downstream server.
+func (m *Manager) Names() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]string, 0, len(m.clients))
+	for name := range m.clients {
+		out = append(out, name)
+	}
+	return out
+}
+
 // Attach initializes an already-constructed client and records its
 // discovered tools under name. Exposed (rather than folded into
 // connectOne) so callers - including tests - can attach a client built any
