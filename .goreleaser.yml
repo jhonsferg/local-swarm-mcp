@@ -2,6 +2,16 @@ version: 2
 
 before:
   hooks:
+    # Rebuilds the embedded dashboard fresh into internal/webui/dist
+    # (see ui/vite.config.ts) before go:embed picks it up, so a release
+    # binary always ships the real UI, not the committed placeholder.
+    # Requires Node - CI's release workflow runs this explicitly first
+    # too, so this is mainly for a local `goreleaser build/release`.
+    # global before.hooks exec directly with no shell (no "&&"/"cd"), and
+    # "sh" isn't guaranteed to exist on Windows - "npm --prefix" avoids
+    # needing either.
+    - npm --prefix ui ci
+    - npm --prefix ui run build
     - go mod tidy
 
 builds:
