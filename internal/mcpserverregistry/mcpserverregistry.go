@@ -29,15 +29,24 @@ type Registry struct {
 	db *bolt.DB
 }
 
-// Open opens (creating if needed) the bbolt database at path.
+// Open opens (creating if needed) the bbolt database at path. Blocks
+// indefinitely if another process already holds the file lock - see
+// OpenWithOptions to bound that wait.
 func Open(path string) (*Registry, error) {
+	return OpenWithOptions(path, nil)
+}
+
+// OpenWithOptions is Open with caller-supplied bbolt options - notably
+// Options.Timeout, so a caller that may race another local-swarm-mcp
+// process for this same store can fail fast instead of hanging forever.
+func OpenWithOptions(path string, opts *bolt.Options) (*Registry, error) {
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create mcp server registry directory: %w", err)
 		}
 	}
 
-	db, err := bolt.Open(path, 0o600, nil)
+	db, err := bolt.Open(path, 0o600, opts)
 	if err != nil {
 		return nil, fmt.Errorf("open mcp server registry: %w", err)
 	}

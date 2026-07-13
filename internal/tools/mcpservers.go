@@ -10,9 +10,10 @@ import (
 )
 
 // MCPServers bundles the dependencies the downstream-MCP-server discovery
-// tools need. Only meaningful when running as the persistent HTTP daemon -
-// registering here both persists the definition and connects it
-// immediately, so it's usable by spawn_agent_task without a restart.
+// tools need. Available both when running as the persistent HTTP daemon and
+// in a plain -transport stdio session - registering here both persists the
+// definition and connects it immediately, so it's usable by spawn_agent_task
+// without a restart.
 type MCPServers struct {
 	Registry   *mcpserverregistry.Registry
 	Downstream *mcpdownstream.Manager

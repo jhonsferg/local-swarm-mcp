@@ -3,6 +3,9 @@ package mcpserverregistry
 import (
 	"path/filepath"
 	"testing"
+	"time"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 func openTestRegistry(t *testing.T) *Registry {
@@ -73,5 +76,30 @@ func TestReopenPersists(t *testing.T) {
 	}
 	if len(servers) != 1 || servers[0].Name != "sonar-bridge-mcp" || len(servers[0].Args) != 1 {
 		t.Fatalf("List() after reopen = %+v", servers)
+	}
+}
+
+// TestOpenWithOptions_TimesOutWhenAlreadyLocked mirrors hostregistry's
+// equivalent test - a stdio session opportunistically sharing the daemon's
+// downstream-MCP-server store must fail fast, not hang, if the daemon
+// already holds the file lock.
+func TestOpenWithOptions_TimesOutWhenAlreadyLocked(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp-servers.db")
+
+	holder, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open (holder): %v", err)
+	}
+	defer func() { _ = holder.Close() }()
+
+	start := time.Now()
+	_, err = OpenWithOptions(path, &bolt.Options{Timeout: 100 * time.Millisecond})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("OpenWithOptions succeeded despite the file already being held open")
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("OpenWithOptions took %s to fail - timeout was not respected", elapsed)
 	}
 }
