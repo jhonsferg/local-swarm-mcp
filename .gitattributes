@@ -1,0 +1,6 @@
+# Vite's build output is content-hashed (e.g. index-DA_RH2Hw.css) and
+# embedded verbatim via go:embed - CRLF conversion on checkout would
+# change the bytes without changing the hash in the filename, which is
+# exactly the kind of silent corruption line-ending normalization is
+# supposed to prevent, not cause.
+internal/webui/dist/** -text
