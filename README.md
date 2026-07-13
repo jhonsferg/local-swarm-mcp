@@ -19,6 +19,31 @@ whatever hardware you already have running a local model, keeping its own
 token budget for the former - and treat that offloaded work like its own
 background agents rather than a single blocking request/response call.
 
+## Expected client behavior: check availability, then prefer this over native agents
+
+This server is meant to sit alongside, not replace, an MCP client's own
+native agent/subagent capability. The intended pattern for a client (e.g.
+an AI coding assistant) that has this server registered:
+
+1. **At the start of a task that could be delegated**, call `list_backends`
+   and/or `health_check` to confirm at least one backend is actually
+   reachable right now - a configured backend whose `llama-server`/Ollama
+   process isn't running, or a remote HTTP transport instance that's
+   offline, should not silently block work.
+2. **If a backend is healthy**, prefer `spawn_task`/`create_session`
+   over the client's own native subagent mechanism for mechanical,
+   low-judgment work (use `classify_task_risk` first if unsure whether a
+   task qualifies) - this is what actually saves tokens/cost, since the
+   work runs on hardware you already own instead of the client's own paid
+   model.
+3. **If no backend is healthy**, fall back to the client's native agents
+   for that work rather than failing the task - this server is a
+   cost-saving optimization, not a hard dependency.
+
+Nothing in the server enforces this - it's a client-side policy this
+project is designed to support. See a specific client's own configuration
+(rules file, memory, system prompt, etc.) for how it's told to apply it.
+
 ## Prerequisites
 
 **1. An OpenAI-compatible inference backend, running somewhere reachable.**
@@ -112,8 +137,14 @@ local-swarm-mcp \
 | `-backend-model` | *(none)* | Model name for the ad-hoc backend |
 | `-backend-key` | *(none)* | API key for the ad-hoc backend, if any |
 | `-store-path` | config file's `store_path`, else `<user cache dir>/local-swarm-mcp/scratch.db` | Override the scratch-store file location |
+| `-transport` | `stdio` | `"stdio"` (spawned as a local subprocess) or `"http"` (a standalone network service) |
+| `-http-addr` | `:8090` | Listen address when `-transport=http`, e.g. `:8090` or `0.0.0.0:8090` |
+| `-api-key` | *(none)* | Bearer token HTTP clients must present when `-transport=http`; required unless `-insecure-no-auth` is set |
+| `-insecure-no-auth` | `false` | Allow `-transport=http` with no `-api-key` - only on a trusted, isolated network |
 
 ## Registering with an MCP client
+
+### Local (stdio) - the common case
 
 Add an entry to your client's MCP config (e.g. Claude Code's `.mcp.json`)
 pointing `command` at the built binary, with any flags you need in `args`:
@@ -128,6 +159,38 @@ pointing `command` at the built binary, with any flags you need in `args`:
   }
 }
 ```
+
+### Remote (HTTP) - running on a separate GPU machine
+
+If your inference hardware lives on a different machine than your MCP
+client (e.g. a DGX Spark, or any other PC with a GPU on your network), run
+local-swarm-mcp *there* instead, with its backends pointed at that
+machine's own local inference server:
+
+```
+local-swarm-mcp -transport http -http-addr 0.0.0.0:8090 -api-key <a-strong-random-token> -config /path/to/config.yaml
+```
+
+Then point your MCP client at it over HTTP (exact config syntax depends on
+your client - check whether it supports a `url` + `headers` style MCP
+entry, e.g.):
+
+```json
+{
+  "mcpServers": {
+    "local-swarm-mcp": {
+      "url": "http://gpu-host:8090/mcp",
+      "headers": { "Authorization": "Bearer <a-strong-random-token>" }
+    }
+  }
+}
+```
+
+`-api-key` is required unless you pass `-insecure-no-auth` - anyone who can
+reach the port can otherwise spawn tasks and read/write the scratch store,
+so treat it like any other network-exposed service. `-insecure-no-auth` is
+only reasonable on a network you fully trust and isolate (e.g. a home LAN
+with no other untrusted devices).
 
 ## Tools
 
