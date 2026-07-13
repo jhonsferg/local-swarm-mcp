@@ -7,10 +7,11 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// Hosts bundles the dependencies the host-discovery tools need. Only
-// meaningful when running as the persistent HTTP daemon - hosts registered
-// here are polled in the background and their models become usable as
-// "<host>/<model>" backends automatically.
+// Hosts bundles the dependencies the host-discovery tools need. Available
+// both when running as the persistent HTTP daemon and in a plain -transport
+// stdio session (each backed by its own in-process poller, sharing the same
+// persisted store) - hosts registered here are polled in the background and
+// their models become usable as "<host>/<model>" backends automatically.
 type Hosts struct {
 	Registry *hostregistry.Registry
 	// OnRegistered triggers an immediate poll of a newly registered host,
@@ -22,7 +23,7 @@ type Hosts struct {
 // register_backend_host.
 func RegisterBackendHostTool() mcp.Tool {
 	return mcp.NewTool("register_backend_host",
-		mcp.WithDescription("Register a new inference host (e.g. a remote Ollama instance on a desktop GPU, a DGX Spark, an AMD AI box) for background model discovery - no config file edit or restart needed. Its models are polled periodically and become usable as \"<host>/<model>\" backend names once discovered; check list_backend_hosts to see what's been found. Only works when local-swarm-mcp is running as the persistent HTTP daemon."),
+		mcp.WithDescription("Register a new inference host (e.g. a remote Ollama instance on a desktop GPU, a DGX Spark, an AMD AI box) for background model discovery - no config file edit or restart needed. Its models are polled periodically and become usable as \"<host>/<model>\" backend names once discovered; check list_backend_hosts to see what's been found."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Short name for this host, e.g. \"rx9070\" or \"dgx-spark\"")),
 		mcp.WithString("base_url", mcp.Required(), mcp.Description("Ollama root URL, e.g. http://192.168.18.29:11434 (no /v1 suffix - that's derived automatically per discovered model)")),
 		mcp.WithString("api_key", mcp.Description("API key for this host, if any")),

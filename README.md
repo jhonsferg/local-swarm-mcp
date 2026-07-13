@@ -228,27 +228,55 @@ go build -o local-swarm-mcp ./cmd/local-swarm-mcp
 ```
 Requires Go 1.26 or newer.
 
-## 🛠️ Configuring backends
+## 🚀 Running the server
 
-There's no config file to maintain: run as the persistent daemon and add
-backends via the CLI or the web UI, both of which take effect immediately
-with no restart.
+There's no required setup and no config file to maintain: just run the
+binary. It starts fine with zero backends configured either way - add one
+progressively afterward (see below) instead of needing everything up front.
 
 ```sh
-# Start the daemon once, with the dashboard on
-local-swarm-mcp -transport http -insecure-no-auth -ui
+# The common case: an MCP client (e.g. Claude Code) spawns this itself
+# over stdio, per the "Registering with an MCP client" config below - you
+# don't normally run this line by hand.
+local-swarm-mcp
 
-# Then, from the CLI (a separate terminal, or a script) - or from the
-# dashboard's "Register host" form instead:
-local-swarm-mcp -register-host -name local-llama -host-base-url http://localhost:11434
+# Run it as a persistent daemon instead (a standalone process you start
+# yourself, with a web dashboard) - useful when your inference hardware
+# lives on a different machine than your MCP client, or you just want the
+# dashboard:
+local-swarm-mcp -transport http -insecure-no-auth -ui
 ```
 
-`-register-host` either talks to the daemon you just started (if one's
-already running at `-http-addr`) or, if none is running yet, becomes the
-daemon itself - see [Host discovery](#-host-discovery---add-inference-hardware-without-editing-config-or-restarting)
-below for the full mechanics. A single ad-hoc backend from flags alone
-(no daemon, no registration) still works too, e.g. for a quick one-off
-`-transport stdio` run:
+Either way, backends aren't required at startup - see
+[Configuring backends](#-configuring-backends) next for how to add one.
+
+## 🛠️ Configuring backends
+
+Register a host - a machine running Ollama (or anything else speaking its
+API) - and its models are polled in the background and become usable
+automatically, no config file edit or restart needed. This works the same
+way regardless of how the server is running:
+
+```sh
+# If your MCP client already has local-swarm-mcp running over stdio (the
+# common case), just call the register_backend_host tool directly through
+# that same connection - no separate command needed.
+
+# Otherwise (a standalone -transport http daemon, or a separate terminal),
+# register from the CLI:
+local-swarm-mcp -register-host -name local-llama -host-base-url http://localhost:11434
+
+# ...or, if a daemon is running with -ui, from its dashboard's
+# "Register host" form instead.
+```
+
+`-register-host` either talks to a daemon already running at `-http-addr`
+(if one is) or, if none is running yet, becomes the daemon itself - see
+[Host discovery](#-host-discovery---add-inference-hardware-without-editing-config-or-restarting)
+below for the full mechanics, including what happens if a stdio session
+and a separate daemon are both active at once. A single ad-hoc backend
+from flags alone (no registration, no persistence) still works too, e.g.
+for a quick one-off run:
 
 ```
 local-swarm-mcp -backend-name local-llama -backend-url http://localhost:8080/v1 -backend-model qwen2.5-coder
@@ -399,6 +427,21 @@ reclaimed automatically (its PID is checked for liveness), but a live PID
 that isn't actually answering as a real local-swarm-mcp daemon is
 reported as a genuine conflict rather than silently overridden.
 
+**A plain `-transport stdio` session gets the same tools too** - it opens
+the same persisted host/downstream-server store and runs its own poller,
+so `register_backend_host` and friends work directly through the MCP
+connection itself, without needing a daemon or the CLI at all. This is
+opportunistic rather than exclusive: unlike `-transport http`, a stdio
+session doesn't go through leader election first, so if a `-transport
+http` daemon is *already* holding that store file when the stdio session
+starts, the stdio session just quietly does without those particular
+tools for that run (every other tool still works normally) instead of
+erroring out or hanging. If you need both at once reliably - a dashboard
+*and* an MCP client registering hosts live - start the daemon first, then
+your MCP client; the reverse order also works as long as the stdio
+session isn't actively holding the lock at the exact moment the daemon
+starts (it retries for up to 5s before giving up with a clear error).
+
 The same operations are also available as MCP tools
 (`register_backend_host`, `unregister_backend_host`,
 `list_backend_hosts`) so an agent - or you, through your MCP client - can
@@ -443,14 +486,21 @@ real time, all without touching a config file or a terminal.
 | `list_backends` | List configured backends (name, base_url, model) |
 | `health_check` | Probe reachability of one backend, or all if omitted |
 
-### 🛰️ Host discovery (only when running with `-transport http`)
+### 🛰️ Host discovery
 | Tool | Purpose |
 |---|---|
 | `register_backend_host` | Register a new inference host for background model discovery |
 | `unregister_backend_host` | Remove a registered host and stop polling it |
 | `list_backend_hosts` | List registered hosts, whether each is currently reachable, and the models discovered on it |
 
-### 🔌 Downstream MCP servers (only when running with `-transport http`)
+Available on every transport, including the default `-transport stdio` -
+each session runs its own poller against the same persisted store, so a
+host registered from one session (or from the dashboard) is there the next
+time any session opens that store, no restart needed. See
+[Host discovery](#-host-discovery---add-inference-hardware-without-editing-config-or-restarting)
+below for the one edge case (two sessions racing for the same store file).
+
+### 🔌 Downstream MCP servers
 | Tool | Purpose |
 |---|---|
 | `register_downstream_mcp_server` | Register and connect a downstream MCP server (e.g. codebase-memory-mcp) at runtime |
