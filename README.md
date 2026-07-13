@@ -48,23 +48,57 @@ project is designed to support. See a specific client's own configuration
 
 **1. An OpenAI-compatible inference backend, running somewhere reachable.**
 local-swarm-mcp does not embed or bundle an inference engine itself - it's a
-thin client in front of one. Pick whichever fits your hardware:
+thin client in front of one. Pick whichever fits your hardware; both were
+verified end-to-end against this server during development.
 
-- **llama.cpp** (recommended for mixed NVIDIA/AMD hardware - its Vulkan
-  backend runs on both without depending on ROCm/CUDA maturity):
-  ```
-  # build or download llama-server, then:
-  llama-server -m /path/to/model.gguf --host 0.0.0.0 --port 8080
-  ```
-- **Ollama** (easiest to set up, auto-detects your GPU backend):
-  ```
-  ollama serve
-  ollama pull qwen2.5-coder
-  ```
-  Ollama's OpenAI-compatible endpoint is at `http://localhost:11434/v1`.
-- **vLLM**, or any hosted provider with an OpenAI-compatible
-  `/v1/chat/completions` endpoint, also work - just point a backend entry
-  at it.
+### Ollama (easiest - recommended if you just want something working)
+
+Ollama bundles model management and an OpenAI-compatible API, and
+auto-detects your GPU backend (CUDA/ROCm/Metal/CPU) with no manual backend
+selection.
+
+**Windows:**
+```powershell
+winget install --id Ollama.Ollama -e
+```
+**macOS:** download from [ollama.com/download](https://ollama.com/download),
+or `brew install ollama`.
+**Linux:**
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+Then pull a small model and start serving (Ollama also auto-starts as a
+background service on Windows/macOS after install - `ollama serve` is only
+needed if it isn't already running):
+```
+ollama pull qwen2.5-coder:1.5b   # ~1GB, comfortable on 4-6GB VRAM laptops
+ollama serve                      # if not already running as a service
+```
+Verify it's up:
+```
+curl http://localhost:11434/v1/models
+```
+Ollama's OpenAI-compatible endpoint is `http://localhost:11434/v1`.
+
+### llama.cpp (better for mixed NVIDIA/AMD hardware)
+
+More manual, but its Vulkan backend runs on both NVIDIA and AMD GPUs without
+depending on ROCm's maturity - useful if you have, say, an NVIDIA laptop and
+an AMD desktop and want one build that works on both.
+
+```
+# build from source (https://github.com/ggml-org/llama.cpp), or grab a
+# release binary for your platform, then:
+llama-server -m /path/to/model.gguf --host 0.0.0.0 --port 8080
+```
+Its OpenAI-compatible endpoint is `http://<host>:8080/v1`.
+
+### Anything else
+
+**vLLM**, or any hosted provider with an OpenAI-compatible
+`/v1/chat/completions` endpoint, also work - just point a backend entry
+at it.
 
 **2. Go 1.26 or newer**, to build local-swarm-mcp itself:
 ```
@@ -252,5 +286,8 @@ drop `-race` for local runs - CI still runs it on all three OSes.
 ## Status
 
 v0.1 - core delegation, task orchestration, sessions, and context tools are
-in place. See the project's plan file (kept with whoever designed this repo)
-for the full architecture rationale.
+in place. Verified end-to-end over stdio against a real Ollama backend
+(`qwen2.5-coder:1.5b`) on a 6GB-VRAM laptop GPU: all 20 tools registered and
+responded correctly, including a full spawn/wait task round-trip and a
+multi-turn session. See the project's plan file (kept with whoever designed
+this repo) for the full architecture rationale.
