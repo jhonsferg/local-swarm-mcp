@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/jhonsferg/local-swarm-mcp/internal/store"
@@ -76,11 +75,7 @@ func (s *Scratch) ScratchListHandler(_ context.Context, _ mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	out, err := json.Marshal(keys)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	return mcp.NewToolResultText(string(out)), nil
+	return jsonResult(keys)
 }
 
 // ScratchDeleteTool returns the MCP tool definition for scratch_delete.
