@@ -137,8 +137,9 @@ Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor White
 Write-Host ""
 Write-Host "  1. Make sure $InstallDir is on your PATH." -ForegroundColor White
-Write-Host "  2. Copy config.example.yaml (or .json) to a config file with your" -ForegroundColor White
-Write-Host "     backends and, optionally, downstream MCP servers." -ForegroundColor White
+Write-Host "  2. Start the daemon and add backends via the dashboard or -register-host -" -ForegroundColor White
+Write-Host "     no config file needed. See the README's `"Configuring backends`" section:" -ForegroundColor White
+Write-Host "       https://github.com/$REPO" -ForegroundColor Cyan
 Write-Host "  3. Register local-swarm-mcp with your MCP client - see:" -ForegroundColor White
 Write-Host "       https://github.com/$REPO#registering-with-an-mcp-client" -ForegroundColor Cyan
 Write-Host ""
