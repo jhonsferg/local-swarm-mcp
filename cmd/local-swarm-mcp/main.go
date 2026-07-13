@@ -101,11 +101,15 @@ func run() error {
 	if cfg.StorePath == "" {
 		cfg.StorePath = config.DefaultStorePath()
 	}
-	// -register-host may be bootstrapping a daemon from nothing but a
-	// discovered host - it doesn't need a statically configured backend to
-	// already exist, unlike every other invocation.
-	if len(cfg.Backends) == 0 && !*registerHost {
-		return fmt.Errorf("no backends configured: provide -config pointing at a config file, or -backend-url/-backend-model for an ad-hoc backend")
+	// The persistent daemon (-transport http, including via -register-host)
+	// can start with zero statically/ad-hoc configured backends - that's
+	// the whole point of host discovery: register one afterward, via
+	// -register-host, the dashboard, or an MCP tool call, with no
+	// restart. Only a one-shot -transport stdio run (no daemon, no
+	// discovery loop to add one later) actually needs a backend already
+	// configured up front.
+	if len(cfg.Backends) == 0 && !*registerHost && *transport != "http" {
+		return fmt.Errorf("no backends configured: provide -backend-url/-backend-model for an ad-hoc backend, or use -transport=http to run the daemon and register one afterward")
 	}
 
 	scratchStore, err := store.Open(cfg.StorePath)
