@@ -57,7 +57,7 @@ func (c *Compactor) CompactContextHandler(ctx context.Context, req mcp.CallToolR
 		{Role: "user", Content: userPrompt},
 	}
 
-	reply, err := c.Client.Complete(ctx, cfg, messages, targetTokens*2, 0.1)
+	reply, err := c.Client.Complete(ctx, cfg, messages, targetTokens*2, 0.1, 0)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

@@ -1,8 +1,15 @@
 // Package hostregistry persists registered inference hosts (e.g. a remote
-// Ollama instance on a desktop GPU, a DGX Spark, an AMD AI Halo box) and the
-// models discovered on them, so a service-discovery poller can keep the
-// backend registry in sync without any YAML/JSON config editing or process
-// restart. Backed by bbolt (already a dependency, pure Go, no cgo).
+// Ollama instance on a desktop GPU, a DGX Spark, an AMD AI Halo box) so a
+// service-discovery poller can keep the backend registry in sync without
+// any YAML/JSON config editing or process restart. Backed by bbolt
+// (already a dependency, pure Go, no cgo).
+//
+// Only the host itself (name, base URL, API key) is persisted. The models
+// discovered on it are never written to disk - they live purely in
+// memory, refreshed by each real poll of the host's own API, so a model
+// you deleted locally stops showing up as soon as the next poll runs
+// rather than lingering from a stale on-disk snapshot until something
+// happens to overwrite it.
 package hostregistry
 
 import (
@@ -16,10 +23,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-var (
-	hostsBucket  = []byte("hosts")
-	modelsBucket = []byte("models")
-)
+var hostsBucket = []byte("hosts")
 
 // Host is a registered inference endpoint - a machine reachable over the
 // network (or localhost) that speaks Ollama's API.
@@ -35,8 +39,9 @@ type Model struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
-// HostStatus is a Host plus the poller's live view of it: the models last
-// seen there, and whether the most recent poll succeeded.
+// HostStatus is a Host plus the poller's live, in-memory-only view of it:
+// the models seen on its most recent successful poll, and whether that
+// poll succeeded.
 type HostStatus struct {
 	Host
 	Models   []Model   `json:"models"`
@@ -45,20 +50,21 @@ type HostStatus struct {
 	LastErr  string    `json:"last_error,omitempty"`
 }
 
-// Registry persists hosts and their discovered models, and keeps a live
-// in-memory status view (Up/LastSeen/LastErr) that the poller updates -
-// that live view is intentionally not persisted, since "was this host up
-// five minutes before the process last exited" isn't meaningful.
+// Registry persists hosts and keeps a live in-memory status view
+// (Models/Up/LastSeen/LastErr) that the poller updates - none of that
+// live view is persisted, since a stale on-disk model list would be
+// exactly the kind of caching a "what's actually there right now" view
+// isn't supposed to have.
 type Registry struct {
 	db *bolt.DB
 
 	mu     sync.RWMutex
-	status map[string]HostStatus // name -> live status, seeded from bbolt at Open
+	status map[string]HostStatus // name -> live status, seeded from bbolt at Open (Models empty until the first poll)
 }
 
 // Open opens (creating if needed) the bbolt database at path and loads any
 // previously registered hosts into the live status map (as not-yet-polled,
-// Up=false, until the poller's first successful check).
+// Up=false, no models, until the poller's first check).
 func Open(path string) (*Registry, error) {
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -72,15 +78,12 @@ func Open(path string) (*Registry, error) {
 	}
 
 	err = db.Update(func(tx *bolt.Tx) error {
-		if _, err := tx.CreateBucketIfNotExists(hostsBucket); err != nil {
-			return err
-		}
-		_, err := tx.CreateBucketIfNotExists(modelsBucket)
+		_, err := tx.CreateBucketIfNotExists(hostsBucket)
 		return err
 	})
 	if err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("init host registry buckets: %w", err)
+		return nil, fmt.Errorf("init host registry bucket: %w", err)
 	}
 
 	r := &Registry{db: db, status: make(map[string]HostStatus)}
@@ -98,26 +101,10 @@ func (r *Registry) loadIntoStatus() error {
 			if err := json.Unmarshal(v, &h); err != nil {
 				return fmt.Errorf("decode host %q: %w", k, err)
 			}
-			models, err := r.modelsForTx(tx, h.Name)
-			if err != nil {
-				return err
-			}
-			r.status[h.Name] = HostStatus{Host: h, Models: models}
+			r.status[h.Name] = HostStatus{Host: h}
 			return nil
 		})
 	})
-}
-
-func (r *Registry) modelsForTx(tx *bolt.Tx, hostName string) ([]Model, error) {
-	v := tx.Bucket(modelsBucket).Get([]byte(hostName))
-	if v == nil {
-		return nil, nil
-	}
-	var models []Model
-	if err := json.Unmarshal(v, &models); err != nil {
-		return nil, fmt.Errorf("decode models for host %q: %w", hostName, err)
-	}
-	return models, nil
 }
 
 // Close releases the underlying database file.
@@ -126,7 +113,10 @@ func (r *Registry) Close() error {
 }
 
 // RegisterHost persists a host and makes it immediately visible in the live
-// status view (Up=false until the poller checks it for the first time).
+// status view (Up=false, no models, until the poller checks it for the
+// first time). Calling this again for an existing name updates its
+// base URL/API key (upsert), which is also how editing a registration
+// works - there's no separate "update" operation.
 func (r *Registry) RegisterHost(h Host) error {
 	data, err := json.Marshal(h)
 	if err != nil {
@@ -146,13 +136,10 @@ func (r *Registry) RegisterHost(h Host) error {
 	return nil
 }
 
-// UnregisterHost removes a host and its discovered models.
+// UnregisterHost removes a host.
 func (r *Registry) UnregisterHost(name string) error {
 	if err := r.db.Update(func(tx *bolt.Tx) error {
-		if err := tx.Bucket(hostsBucket).Delete([]byte(name)); err != nil {
-			return err
-		}
-		return tx.Bucket(modelsBucket).Delete([]byte(name))
+		return tx.Bucket(hostsBucket).Delete([]byte(name))
 	}); err != nil {
 		return fmt.Errorf("remove host %q: %w", name, err)
 	}
@@ -179,21 +166,10 @@ func (r *Registry) Hosts() ([]Host, error) {
 	return hosts, err
 }
 
-// RecordPoll updates the live status and, when models is non-nil (a
-// successful poll), persists the discovered model list.
+// RecordPoll updates the live in-memory status with the outcome of a real
+// poll. Nothing here touches disk - models is never persisted, so a model
+// removed on the host itself stops showing up as of the very next poll.
 func (r *Registry) RecordPoll(hostName string, models []Model, pollErr error) error {
-	if models != nil {
-		data, err := json.Marshal(models)
-		if err != nil {
-			return err
-		}
-		if err := r.db.Update(func(tx *bolt.Tx) error {
-			return tx.Bucket(modelsBucket).Put([]byte(hostName), data)
-		}); err != nil {
-			return fmt.Errorf("persist models for host %q: %w", hostName, err)
-		}
-	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	st := r.status[hostName]
@@ -204,9 +180,7 @@ func (r *Registry) RecordPoll(hostName string, models []Model, pollErr error) er
 	} else {
 		st.Up = true
 		st.LastErr = ""
-		if models != nil {
-			st.Models = models
-		}
+		st.Models = models
 	}
 	r.status[hostName] = st
 	return nil

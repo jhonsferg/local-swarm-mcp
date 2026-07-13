@@ -24,6 +24,7 @@ func SpawnTaskTool() mcp.Tool {
 		mcp.WithString("system_prompt", mcp.Description("Optional system prompt")),
 		mcp.WithNumber("max_tokens", mcp.DefaultNumber(1024), mcp.Description("Maximum tokens to generate")),
 		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature")),
+		mcp.WithNumber("top_p", mcp.Description("Nucleus sampling threshold (0-1); omit to use the backend's own default")),
 	)
 }
 
@@ -37,8 +38,9 @@ func (t *Tasks) SpawnTaskHandler(_ context.Context, req mcp.CallToolRequest) (*m
 	systemPrompt := req.GetString("system_prompt", "")
 	maxTokens := int(req.GetFloat("max_tokens", 1024))
 	temperature := req.GetFloat("temperature", 0.2)
+	topP := req.GetFloat("top_p", 0)
 
-	id, err := t.Registry.Spawn(backendName, systemPrompt, prompt, maxTokens, temperature)
+	id, err := t.Registry.Spawn(backendName, systemPrompt, prompt, maxTokens, temperature, topP)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

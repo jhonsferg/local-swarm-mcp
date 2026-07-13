@@ -230,100 +230,125 @@ Requires Go 1.26 or newer.
 
 ## 🛠️ Configuring backends
 
-Backends can come from a config file, from command-line flags, or both (an
-ad-hoc `-backend-url` is appended on top of whatever the config file
-loaded). At least one backend must end up configured or the server refuses
-to start.
+There's no config file to maintain: run as the persistent daemon and add
+backends via the CLI or the web UI, both of which take effect immediately
+with no restart.
 
-### Option A: config file (YAML or JSON)
+```sh
+# Start the daemon once, with the dashboard on
+local-swarm-mcp -transport http -insecure-no-auth -ui
 
-Format is auto-detected from the file extension (`.json` => JSON, anything
-else => YAML); override with `-config-format`.
+# Then, from the CLI (a separate terminal, or a script) - or from the
+# dashboard's "Register host" form instead:
+local-swarm-mcp -register-host -name local-llama -host-base-url http://localhost:11434
+```
 
-`config.yaml`:
+`-register-host` either talks to the daemon you just started (if one's
+already running at `-http-addr`) or, if none is running yet, becomes the
+daemon itself - see [Host discovery](#-host-discovery---add-inference-hardware-without-editing-config-or-restarting)
+below for the full mechanics. A single ad-hoc backend from flags alone
+(no daemon, no registration) still works too, e.g. for a quick one-off
+`-transport stdio` run:
+
+```
+local-swarm-mcp -backend-name local-llama -backend-url http://localhost:8080/v1 -backend-model qwen2.5-coder
+```
+
+### Flags that matter most
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `-transport` | `stdio` | `"stdio"` (spawned as a local subprocess) or `"http"` (the persistent daemon) |
+| `-ui` | `false` | Serve the embedded dashboard at `/` - only meaningful for `-transport=http` |
+| `-http-addr` | `:8090` | Listen address when `-transport=http`, e.g. `:8090` or `0.0.0.0:8090` |
+| `-api-key` | *(none)* | Bearer token HTTP clients must present when `-transport=http`; required unless `-insecure-no-auth` is set |
+| `-insecure-no-auth` | `false` | Allow `-transport=http` with no `-api-key` - only on a trusted, isolated network |
+| `-register-host` | `false` | Register an inference host for background discovery - see `-name`/`-host-base-url`/`-host-api-key` |
+| `-backend-name`/`-backend-url`/`-backend-model`/`-backend-key` | *(none)* | A single ad-hoc backend, for a quick run without the daemon |
+| `-store-path` | `<user cache dir>/local-swarm-mcp/scratch.db` | Override the scratch-store file location |
+
+Run `local-swarm-mcp -h` for the full, grouped flag reference (host
+discovery, downstream MCP servers, storage locations, and more).
+
+<details>
+<summary>Legacy: YAML/JSON config file</summary>
+
+A `-config path/to/config.yaml` (or `.json`) file with `backends:` and
+`mcp_servers:` lists still works and is still auto-detected at
+`<user config dir>/local-swarm-mcp/config.yaml` if present - this predates
+host discovery and dynamic downstream MCP server registration, and is no
+longer the recommended way to configure anything covered by those
+features. It remains useful for exactly one thing: a fixed, version-
+controllable starting point loaded once at daemon startup (or for a
+`-transport stdio` run where a persistent daemon isn't wanted at all).
+
 ```yaml
 backends:
   - name: local-llama
     base_url: http://localhost:8080/v1
     model: qwen2.5-coder
-
-  - name: local-ollama
-    base_url: http://localhost:11434/v1
-    model: qwen2.5-coder:7b
-
-# Optional - defaults to <user cache dir>/local-swarm-mcp/scratch.db
+mcp_servers:
+  - name: codebase-memory-mcp
+    command: /path/to/codebase-memory-mcp
 store_path: C:\Users\you\.cache\local-swarm-mcp\scratch.db
 ```
 
-Equivalent `config.json`:
-```json
-{
-  "backends": [
-    { "name": "local-llama", "base_url": "http://localhost:8080/v1", "model": "qwen2.5-coder" }
-  ],
-  "store_path": "C:\\Users\\you\\.cache\\local-swarm-mcp\\scratch.db"
-}
-```
-
-Run with `-config path/to/config.yaml` (or `.json`). If `-config` is
-omitted, the server looks for `<user config dir>/local-swarm-mcp/config.yaml`
-(`%APPDATA%\local-swarm-mcp\config.yaml` on Windows,
-`~/.config/local-swarm-mcp/config.yaml` on Linux/macOS) - if that file
-doesn't exist either, a missing config is not an error on its own, as long
-as `-backend-url` supplies at least one backend.
-
-### Option B: flags only, no config file
-
-```
-local-swarm-mcp \
-  -backend-name local-llama \
-  -backend-url http://localhost:8080/v1 \
-  -backend-model qwen2.5-coder
-```
-
-### All flags
-
-| Flag | Default | Purpose |
-|---|---|---|
-| `-config` | `<user config dir>/local-swarm-mcp/config.yaml` | Path to a YAML or JSON config file |
-| `-config-format` | auto-detect from `-config`'s extension | Force `"yaml"` or `"json"` parsing |
-| `-backend-name` | `cli` | Name for the ad-hoc backend given via `-backend-url` |
-| `-backend-url` | *(none)* | Base URL for an ad-hoc backend, added on top of any config-file backends |
-| `-backend-model` | *(none)* | Model name for the ad-hoc backend |
-| `-backend-key` | *(none)* | API key for the ad-hoc backend, if any |
-| `-store-path` | config file's `store_path`, else `<user cache dir>/local-swarm-mcp/scratch.db` | Override the scratch-store file location |
-| `-transport` | `stdio` | `"stdio"` (spawned as a local subprocess) or `"http"` (a standalone network service) |
-| `-http-addr` | `:8090` | Listen address when `-transport=http`, e.g. `:8090` or `0.0.0.0:8090` |
-| `-api-key` | *(none)* | Bearer token HTTP clients must present when `-transport=http`; required unless `-insecure-no-auth` is set |
-| `-insecure-no-auth` | `false` | Allow `-transport=http` with no `-api-key` - only on a trusted, isolated network |
+⚠️ **This file auto-loads even if you never pass `-config`** - the flag's
+*default value* is that same `<user config dir>` path, so if it exists
+from an earlier setup, its `backends:` list gets loaded every time and
+sits alongside anything registered dynamically, permanently, since a
+static entry is never touched by the discovery poller (it isn't the
+poller's to manage). If you've moved to host discovery and still see an
+old model that no longer exists on some host, this file - not a bug in
+discovery - is almost certainly why: either delete it, or empty out its
+`backends:` list, and restart the daemon.
+</details>
 
 ## 🔌 Registering with an MCP client
 
 ### 💻 Local (stdio) - the common case
 
 Add an entry to your client's MCP config (e.g. Claude Code's `.mcp.json`)
-pointing `command` at the built binary, with any flags you need in `args`:
+pointing `command` at the built binary:
 
 ```json
 {
   "mcpServers": {
     "local-swarm-mcp": {
-      "command": "/path/to/local-swarm-mcp",
-      "args": ["-config", "/path/to/config.yaml"]
+      "command": "/path/to/local-swarm-mcp"
     }
   }
 }
 ```
 
+Keep this path **unversioned** (`local-swarm-mcp`, not
+`local-swarm-mcp-v2`): rebuilding to the same fixed path means your
+client's config never needs to change and you never need to restart it
+just to pick up a new build. Windows won't let you overwrite a `.exe`
+its own running process has open, but it *will* let you rename one out
+of the way first - so on Windows, rebuild like this instead of building
+straight over it:
+
+```powershell
+Rename-Item local-swarm-mcp.exe local-swarm-mcp.exe.old -ErrorAction SilentlyContinue
+go build -o local-swarm-mcp.exe ./cmd/local-swarm-mcp
+```
+
+The already-running process keeps working fine off the renamed file
+(Windows processes hold an open handle, not a path) until it's next
+restarted, at which point it picks up the new build from the same
+stable path - no config edit required.
+
 ### 🌍 Remote (HTTP) - running on a separate GPU machine
 
 If your inference hardware lives on a different machine than your MCP
 client (e.g. a DGX Spark, or any other PC with a GPU on your network), run
-local-swarm-mcp *there* instead, with its backends pointed at that
-machine's own local inference server:
+local-swarm-mcp *there* instead, then register that machine's own local
+inference server as a host once it's up (from another machine, or from
+the dashboard):
 
 ```
-local-swarm-mcp -transport http -http-addr 0.0.0.0:8090 -api-key <a-strong-random-token> -config /path/to/config.yaml
+local-swarm-mcp -transport http -http-addr 0.0.0.0:8090 -api-key <a-strong-random-token> -ui
 ```
 
 Then point your MCP client at it over HTTP (exact config syntax depends on
@@ -437,6 +462,21 @@ real time, all without touching a config file or a terminal.
 |---|---|
 | `delegate_task` | Send a task to a backend and block for the completion - the simple synchronous path |
 | `compact_context` | Summarize a block of text down to a target size via a backend, so it doesn't sit uncompacted in the client's own context |
+
+`delegate_task`, `spawn_task`, `send_message`, and `spawn_agent_task` all take
+the same three sampling parameters: `max_tokens`, `temperature`, `top_p`.
+Deliberately only these three - they're the ones the OpenAI
+chat-completions spec actually defines, so they're honored consistently
+whether the backend is llama.cpp, Ollama, vLLM, or a hosted provider.
+Ollama-specific knobs like `num_ctx` (context window size) or `top_k`
+aren't part of that spec: verified live, Ollama's OpenAI-compatible
+endpoint accepts them in an `options` object without erroring but
+silently ignores them, so they're not exposed here - a parameter that
+looks like it works but quietly doesn't would be worse than not having
+it. Tuning those for real currently means either building a derived
+model with `ollama create` and its own baked-in `PARAMETER num_ctx ...`,
+or calling the backend's native API directly rather than through
+local-swarm-mcp.
 
 ### 🎯 Background tasks (fire-and-forget, like spawning a subagent)
 | Tool | Purpose |

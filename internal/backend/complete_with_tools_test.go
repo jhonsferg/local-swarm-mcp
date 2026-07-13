@@ -2,8 +2,10 @@ package backend
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jhonsferg/local-swarm-mcp/internal/config"
@@ -54,7 +56,7 @@ func TestCompleteWithTools_ParsesToolCalls(t *testing.T) {
 		},
 	}}
 
-	result, err := client.CompleteWithTools(t.Context(), b, []ChatMessage{{Role: "user", Content: "hi"}}, tools, 64, 0.1)
+	result, err := client.CompleteWithTools(t.Context(), b, []ChatMessage{{Role: "user", Content: "hi"}}, tools, 64, 0.1, 0)
 	if err != nil {
 		t.Fatalf("CompleteWithTools: %v", err)
 	}
@@ -95,11 +97,53 @@ func TestComplete_StillWorksWithoutTools(t *testing.T) {
 
 	client := NewClient()
 	b := config.Backend{Name: "test", BaseURL: srv.URL, Model: "m"}
-	reply, err := client.Complete(t.Context(), b, []ChatMessage{{Role: "user", Content: "ping"}}, 10, 0.1)
+	reply, err := client.Complete(t.Context(), b, []ChatMessage{{Role: "user", Content: "ping"}}, 10, 0.1, 0)
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 	if reply != "PONG" {
 		t.Fatalf("unexpected reply: %q", reply)
+	}
+}
+
+func TestCompleteWithTools_SendsTopPWhenSet(t *testing.T) {
+	var received chatRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&received)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "ok"}}},
+		})
+	}))
+	defer srv.Close()
+
+	client := NewClient()
+	b := config.Backend{Name: "test", BaseURL: srv.URL, Model: "m"}
+	if _, err := client.Complete(t.Context(), b, []ChatMessage{{Role: "user", Content: "hi"}}, 10, 0.5, 0.9); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	if received.TopP != 0.9 {
+		t.Fatalf("request.TopP = %v, want 0.9", received.TopP)
+	}
+}
+
+func TestCompleteWithTools_OmitsTopPWhenUnset(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "top_p") {
+			t.Errorf("request body should omit top_p when unset, got: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "ok"}}},
+		})
+	}))
+	defer srv.Close()
+
+	client := NewClient()
+	b := config.Backend{Name: "test", BaseURL: srv.URL, Model: "m"}
+	if _, err := client.Complete(t.Context(), b, []ChatMessage{{Role: "user", Content: "hi"}}, 10, 0.5, 0); err != nil {
+		t.Fatalf("Complete: %v", err)
 	}
 }
