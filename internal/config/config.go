@@ -3,9 +3,11 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,39 +15,70 @@ import (
 // Backend describes a single OpenAI-compatible inference endpoint, whether
 // that's a local llama.cpp/Ollama server or a remote provider.
 type Backend struct {
-	Name    string `yaml:"name"`
-	BaseURL string `yaml:"base_url"`
-	APIKey  string `yaml:"api_key,omitempty"`
-	Model   string `yaml:"model"`
+	Name    string `yaml:"name" json:"name"`
+	BaseURL string `yaml:"base_url" json:"base_url"`
+	APIKey  string `yaml:"api_key,omitempty" json:"api_key,omitempty"`
+	Model   string `yaml:"model" json:"model"`
 }
 
 // Config is the top-level local-swarm-mcp configuration.
 type Config struct {
-	Backends  []Backend `yaml:"backends"`
-	StorePath string    `yaml:"store_path"`
+	Backends  []Backend `yaml:"backends" json:"backends"`
+	StorePath string    `yaml:"store_path,omitempty" json:"store_path,omitempty"`
 }
 
-// Load reads and parses a YAML config file from path, filling in defaults
-// for any fields left unset.
-func Load(path string) (*Config, error) {
+// Load reads and parses a config file from path, auto-detecting YAML vs
+// JSON from its extension (.json => JSON, anything else => YAML), and
+// filling in defaults for any fields left unset. Pass a non-empty format
+// ("yaml" or "json") to override auto-detection.
+func Load(path, format string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	cfg, err := parse(data, resolveFormat(path, format))
+	if err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 
 	if cfg.StorePath == "" {
-		cfg.StorePath = defaultStorePath()
+		cfg.StorePath = DefaultStorePath()
 	}
 
+	return cfg, nil
+}
+
+func resolveFormat(path, format string) string {
+	if format != "" {
+		return format
+	}
+	if strings.EqualFold(filepath.Ext(path), ".json") {
+		return "json"
+	}
+	return "yaml"
+}
+
+func parse(data []byte, format string) (*Config, error) {
+	var cfg Config
+	var err error
+	switch format {
+	case "json":
+		err = json.Unmarshal(data, &cfg)
+	case "yaml":
+		err = yaml.Unmarshal(data, &cfg)
+	default:
+		return nil, fmt.Errorf("unknown config format %q (want \"yaml\" or \"json\")", format)
+	}
+	if err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 
-func defaultStorePath() string {
+// DefaultStorePath returns the scratch-store path used when none is set in
+// config or on the command line.
+func DefaultStorePath() string {
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		return "local-swarm-mcp-scratch.db"
