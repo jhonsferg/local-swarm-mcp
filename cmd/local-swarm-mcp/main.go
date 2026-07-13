@@ -23,7 +23,10 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const version = "0.1.0"
+// version is overridden at build time via -ldflags "-X main.version=vX.Y.Z"
+// (goreleaser does this for release binaries); a plain `go build` keeps it
+// as "dev".
+var version = "dev"
 
 func main() {
 	if err := run(); err != nil {
@@ -33,6 +36,8 @@ func main() {
 }
 
 func run() error {
+	flag.Usage = usage
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	configPath := flag.String("config", defaultConfigPath(), "path to config file (YAML or JSON)")
 	configFormat := flag.String("config-format", "", `config file format: "yaml" or "json" (default: auto-detect from the -config extension)`)
 	backendName := flag.String("backend-name", "cli", "name for an ad-hoc backend given via -backend-url (added on top of any config file backends)")
@@ -45,6 +50,11 @@ func run() error {
 	apiKey := flag.String("api-key", "", "bearer token required of HTTP clients when -transport=http; required unless -insecure-no-auth is set")
 	insecureNoAuth := flag.Bool("insecure-no-auth", false, "allow -transport=http with no -api-key (only for a trusted, isolated network)")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("local-swarm-mcp", version)
+		return nil
+	}
 
 	cfg, err := loadConfig(*configPath, *configFormat)
 	if err != nil {
@@ -179,6 +189,69 @@ func registerTools(
 	s.AddTool(tools.ListSessionsTool(), sessionTools.ListSessionsHandler)
 	s.AddTool(tools.SpawnAgentTaskTool(), agentTools.SpawnAgentTaskHandler)
 	s.AddTool(tools.ListAvailableAgentToolsTool(), agentTools.ListAvailableAgentToolsHandler)
+}
+
+// usage replaces the default flag-package help output with flags grouped
+// by concern, plus a couple of runnable examples mirroring the README.
+func usage() {
+	fmt.Fprintf(os.Stderr, `local-swarm-mcp %s
+
+An MCP server that delegates mechanical tasks to local or remote
+OpenAI-compatible inference backends, and lets an MCP client spawn
+background tasks, multi-turn sessions, and tool-using agents against them.
+
+Usage:
+  local-swarm-mcp [flags]
+
+Config:
+  -config string
+        path to config file, YAML or JSON (default "%s")
+  -config-format string
+        force "yaml" or "json" parsing (default: auto-detect from -config's extension)
+
+Ad-hoc backend (added on top of any config-file backends; at least one
+backend must end up configured, from either source):
+  -backend-name string
+        name for the ad-hoc backend (default "cli")
+  -backend-url string
+        base URL, e.g. http://localhost:8080/v1
+  -backend-model string
+        model name
+  -backend-key string
+        API key, if any
+
+Transport:
+  -transport string
+        "stdio" (spawned as a local subprocess) or "http" (a standalone network service) (default "stdio")
+  -http-addr string
+        listen address when -transport=http (default ":8090")
+  -api-key string
+        bearer token HTTP clients must present when -transport=http
+  -insecure-no-auth
+        allow -transport=http with no -api-key (trusted, isolated networks only)
+
+Storage:
+  -store-path string
+        override the scratch-store file location
+
+Other:
+  -version
+        print the version and exit
+  -h, -help
+        show this help
+
+Examples:
+  # Config file (YAML or JSON), the common case
+  local-swarm-mcp -config /path/to/config.yaml
+
+  # No config file - a single ad-hoc backend from flags alone
+  local-swarm-mcp -backend-url http://localhost:8080/v1 -backend-model qwen2.5-coder
+
+  # Hosted on a separate GPU machine, reachable over HTTP
+  local-swarm-mcp -transport http -http-addr 0.0.0.0:8090 -api-key <token> -config /path/to/config.yaml
+
+See https://github.com/jhonsferg/local-swarm-mcp for the full tool reference and config format.
+`, version, defaultConfigPath())
 }
 
 func defaultConfigPath() string {
