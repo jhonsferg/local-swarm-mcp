@@ -2,6 +2,7 @@
 /local-swarm-mcp.exe
 /dist/
 *.db
+coverage.out
 config.yaml
 .idea/
 .vscode/
