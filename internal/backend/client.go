@@ -88,6 +88,7 @@ type chatRequest struct {
 	Tools       []ToolSpec    `json:"tools,omitempty"`
 	MaxTokens   int           `json:"max_tokens,omitempty"`
 	Temperature float64       `json:"temperature,omitempty"`
+	TopP        float64       `json:"top_p,omitempty"`
 }
 
 type chatResponse struct {
@@ -114,8 +115,8 @@ func NewClient() *Client {
 
 // Complete sends messages to the given backend and returns the assistant's
 // reply text. Equivalent to CompleteWithTools with no tools.
-func (c *Client) Complete(ctx context.Context, b config.Backend, messages []ChatMessage, maxTokens int, temperature float64) (string, error) {
-	result, err := c.CompleteWithTools(ctx, b, messages, nil, maxTokens, temperature)
+func (c *Client) Complete(ctx context.Context, b config.Backend, messages []ChatMessage, maxTokens int, temperature, topP float64) (string, error) {
+	result, err := c.CompleteWithTools(ctx, b, messages, nil, maxTokens, temperature, topP)
 	if err != nil {
 		return "", err
 	}
@@ -129,13 +130,23 @@ func (c *Client) Complete(ctx context.Context, b config.Backend, messages []Chat
 // ToolCalls empty and its attempt (if any) folded into Content as plain
 // text - callers that care should verify their chosen model actually
 // produces ToolCalls before relying on this path.
-func (c *Client) CompleteWithTools(ctx context.Context, b config.Backend, messages []ChatMessage, tools []ToolSpec, maxTokens int, temperature float64) (CompletionResult, error) {
+//
+// maxTokens, temperature, and topP are the only sampling parameters
+// exposed here deliberately: they're the ones the OpenAI chat-completions
+// spec actually defines, so they're honored consistently across
+// llama.cpp/Ollama/vLLM/hosted providers alike. Ollama-specific knobs
+// like num_ctx or top_k aren't part of that spec and, verified live
+// against a real Ollama instance, are silently ignored when sent this
+// way rather than erroring - not exposed here to avoid a parameter that
+// looks like it works but quietly doesn't for some backends.
+func (c *Client) CompleteWithTools(ctx context.Context, b config.Backend, messages []ChatMessage, tools []ToolSpec, maxTokens int, temperature, topP float64) (CompletionResult, error) {
 	reqBody := chatRequest{
 		Model:       b.Model,
 		Messages:    messages,
 		Tools:       tools,
 		MaxTokens:   maxTokens,
 		Temperature: temperature,
+		TopP:        topP,
 	}
 	payload, err := json.Marshal(reqBody)
 	if err != nil {

@@ -26,6 +26,7 @@ func SpawnAgentTaskTool() mcp.Tool {
 		mcp.WithNumber("max_iterations", mcp.DefaultNumber(float64(orchestrator.DefaultMaxIterations)), mcp.Description("Maximum tool-call round-trips before giving up")),
 		mcp.WithNumber("max_tokens", mcp.DefaultNumber(1024), mcp.Description("Maximum tokens to generate per completion")),
 		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature")),
+		mcp.WithNumber("top_p", mcp.Description("Nucleus sampling threshold (0-1); omit to use the backend's own default")),
 	)
 }
 
@@ -42,8 +43,9 @@ func (a *Agents) SpawnAgentTaskHandler(_ context.Context, req mcp.CallToolReques
 	maxIterations := int(req.GetFloat("max_iterations", float64(orchestrator.DefaultMaxIterations)))
 	maxTokens := int(req.GetFloat("max_tokens", 1024))
 	temperature := req.GetFloat("temperature", 0.2)
+	topP := req.GetFloat("top_p", 0)
 
-	id, err := a.TaskRegistry.SpawnAgent(backendName, systemPrompt, prompt, a.Downstream, serverFilter, maxIterations, maxTokens, temperature)
+	id, err := a.TaskRegistry.SpawnAgent(backendName, systemPrompt, prompt, a.Downstream, serverFilter, maxIterations, maxTokens, temperature, topP)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

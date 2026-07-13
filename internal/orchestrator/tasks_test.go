@@ -41,7 +41,7 @@ func TestTaskRegistry_SpawnAndWait(t *testing.T) {
 	srv := fakeChatServer(t, "hello", 0)
 	tr := NewTaskRegistry(backend.NewClient(), testRegistry(srv.URL))
 
-	id, err := tr.Spawn("", "", "hi", 64, 0.1)
+	id, err := tr.Spawn("", "", "hi", 64, 0.1, 0)
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestTaskRegistry_SpawnAndWait(t *testing.T) {
 
 func TestTaskRegistry_UnknownBackend(t *testing.T) {
 	tr := NewTaskRegistry(backend.NewClient(), backend.NewRegistry(nil))
-	if _, err := tr.Spawn("nope", "", "hi", 64, 0.1); err == nil {
+	if _, err := tr.Spawn("nope", "", "hi", 64, 0.1, 0); err == nil {
 		t.Fatal("expected an error for an unknown backend")
 	}
 }
@@ -66,7 +66,7 @@ func TestTaskRegistry_Cancel(t *testing.T) {
 	srv := fakeChatServer(t, "hello", 2*time.Second)
 	tr := NewTaskRegistry(backend.NewClient(), testRegistry(srv.URL))
 
-	id, err := tr.Spawn("", "", "hi", 64, 0.1)
+	id, err := tr.Spawn("", "", "hi", 64, 0.1, 0)
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestTaskRegistry_ListAndStatus(t *testing.T) {
 	srv := fakeChatServer(t, "ok", 0)
 	tr := NewTaskRegistry(backend.NewClient(), testRegistry(srv.URL))
 
-	id, err := tr.Spawn("", "", "hi", 64, 0.1)
+	id, err := tr.Spawn("", "", "hi", 64, 0.1, 0)
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}

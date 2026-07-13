@@ -16,7 +16,7 @@ func TestSessionRegistry_CreateSendHistoryClose(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	reply, err := sr.Send(context.Background(), id, "hi", 64, 0.1)
+	reply, err := sr.Send(context.Background(), id, "hi", 64, 0.1, 0)
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestSessionRegistry_CreateSendHistoryClose(t *testing.T) {
 
 func TestSessionRegistry_UnknownSession(t *testing.T) {
 	sr := NewSessionRegistry(backend.NewClient(), backend.NewRegistry(nil))
-	if _, err := sr.Send(context.Background(), "nope", "hi", 64, 0.1); err == nil {
+	if _, err := sr.Send(context.Background(), "nope", "hi", 64, 0.1, 0); err == nil {
 		t.Fatal("expected an error for an unknown session")
 	}
 }
