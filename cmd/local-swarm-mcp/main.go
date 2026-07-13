@@ -8,9 +8,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 
+	"github.com/jhonsferg/local-swarm-mcp/internal/authmw"
 	"github.com/jhonsferg/local-swarm-mcp/internal/backend"
 	"github.com/jhonsferg/local-swarm-mcp/internal/config"
 	"github.com/jhonsferg/local-swarm-mcp/internal/orchestrator"
@@ -36,6 +38,10 @@ func run() error {
 	backendModel := flag.String("backend-model", "", "model name for the ad-hoc backend")
 	backendKey := flag.String("backend-key", "", "API key for the ad-hoc backend, if any")
 	storePathFlag := flag.String("store-path", "", "override the scratch-store file path")
+	transport := flag.String("transport", "stdio", `how the MCP client reaches this server: "stdio" (spawned as a local subprocess) or "http" (a standalone network service, e.g. running on a remote GPU machine)`)
+	httpAddr := flag.String("http-addr", ":8090", `listen address when -transport=http, e.g. ":8090" or "0.0.0.0:8090"`)
+	apiKey := flag.String("api-key", "", "bearer token required of HTTP clients when -transport=http; required unless -insecure-no-auth is set")
+	insecureNoAuth := flag.Bool("insecure-no-auth", false, "allow -transport=http with no -api-key (only for a trusted, isolated network)")
 	flag.Parse()
 
 	cfg, err := loadConfig(*configPath, *configFormat)
@@ -75,7 +81,37 @@ func run() error {
 	mcpServer := server.NewMCPServer("local-swarm-mcp", version)
 	registerTools(mcpServer, registry, client, scratchStore, taskRegistry, sessionRegistry)
 
-	return server.ServeStdio(mcpServer)
+	switch *transport {
+	case "stdio":
+		return server.ServeStdio(mcpServer)
+	case "http":
+		return serveHTTP(mcpServer, *httpAddr, *apiKey, *insecureNoAuth)
+	default:
+		return fmt.Errorf("unknown -transport %q (want \"stdio\" or \"http\")", *transport)
+	}
+}
+
+// serveHTTP runs the MCP server over Streamable HTTP so it can be reached
+// across the network - e.g. hosted on a separate GPU machine (a DGX Spark,
+// a desktop with a discrete GPU, etc.) rather than spawned as a local
+// stdio subprocess. Requires -api-key unless -insecure-no-auth explicitly
+// accepts an unauthenticated listener (only reasonable on a trusted,
+// isolated network).
+func serveHTTP(mcpServer *server.MCPServer, addr, apiKey string, insecureNoAuth bool) error {
+	if apiKey == "" && !insecureNoAuth {
+		return fmt.Errorf("-transport=http requires -api-key (or explicit -insecure-no-auth for a trusted, isolated network)")
+	}
+
+	httpServer := server.NewStreamableHTTPServer(mcpServer)
+
+	if apiKey == "" {
+		fmt.Fprintln(os.Stderr, "local-swarm-mcp: WARNING - serving HTTP with -insecure-no-auth, no bearer token required")
+		return httpServer.Start(addr)
+	}
+
+	authed := authmw.RequireBearer(httpServer, apiKey)
+	fmt.Fprintf(os.Stderr, "local-swarm-mcp: serving HTTP on %s (bearer token required)\n", addr)
+	return http.ListenAndServe(addr, authed) //nolint:gosec // timeouts aren't meaningful for a long-lived MCP streaming endpoint
 }
 
 // loadConfig reads the config file at path if it exists, or returns an
