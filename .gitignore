@@ -6,3 +6,12 @@ coverage.out
 config.yaml
 .idea/
 .vscode/
+
+# ui/ (Vue frontend) - node_modules and its own cache are never committed.
+# Its build output IS committed at internal/webui/dist (see that
+# package's doc comment): a bare `go build` must work on a fresh clone
+# without Node installed, so CI/goreleaser always rebuild it fresh before
+# compiling, but a checked-in baseline keeps go-only contributors unblocked.
+ui/node_modules/
+ui/.vite/
+ui/tsconfig.tsbuildinfo
