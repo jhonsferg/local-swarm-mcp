@@ -35,17 +35,22 @@ type task struct {
 	startedAt  time.Time
 	finishedAt time.Time
 	cancel     context.CancelFunc
+	// transcript is set only for agent tasks (SpawnAgent): every tool call
+	// the model made, its arguments, and the result, so a caller can audit
+	// what an agent actually did rather than just trust its final answer.
+	transcript []ToolCallRecord
 }
 
 // TaskInfo is a safe, immutable snapshot of a task's state for callers.
 type TaskInfo struct {
-	ID         string     `json:"id"`
-	Backend    string     `json:"backend"`
-	Status     TaskStatus `json:"status"`
-	Result     string     `json:"result,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	StartedAt  time.Time  `json:"started_at"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	ID         string           `json:"id"`
+	Backend    string           `json:"backend"`
+	Status     TaskStatus       `json:"status"`
+	Result     string           `json:"result,omitempty"`
+	Error      string           `json:"error,omitempty"`
+	StartedAt  time.Time        `json:"started_at"`
+	FinishedAt *time.Time       `json:"finished_at,omitempty"`
+	Transcript []ToolCallRecord `json:"transcript,omitempty"`
 }
 
 // TaskRegistry tracks background tasks spawned against a backend.
@@ -93,7 +98,7 @@ func (tr *TaskRegistry) run(ctx context.Context, t *task, systemPrompt, prompt s
 
 	cfg, err := tr.registry.Get(t.backend)
 	if err != nil {
-		tr.finish(t, "", err, ctx)
+		tr.finish(t, "", nil, err, ctx)
 		return
 	}
 
@@ -104,14 +109,18 @@ func (tr *TaskRegistry) run(ctx context.Context, t *task, systemPrompt, prompt s
 	messages = append(messages, backend.ChatMessage{Role: "user", Content: prompt})
 
 	result, err := tr.client.Complete(ctx, cfg, messages, maxTokens, temperature)
-	tr.finish(t, result, err, ctx)
+	tr.finish(t, result, nil, err, ctx)
 }
 
-func (tr *TaskRegistry) finish(t *task, result string, err error, ctx context.Context) {
+// finish records a task's terminal state atomically: result/error status
+// and (for agent tasks) its tool-call transcript together, so a concurrent
+// Status()/List() call never observes one without the other.
+func (tr *TaskRegistry) finish(t *task, result string, transcript []ToolCallRecord, err error, ctx context.Context) {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
 
 	t.finishedAt = time.Now()
+	t.transcript = transcript
 	switch {
 	case err != nil && ctx.Err() != nil:
 		t.status = TaskCancelled
@@ -126,12 +135,13 @@ func (tr *TaskRegistry) finish(t *task, result string, err error, ctx context.Co
 
 func toInfo(t *task) TaskInfo {
 	info := TaskInfo{
-		ID:        t.id,
-		Backend:   t.backend,
-		Status:    t.status,
-		Result:    t.result,
-		Error:     t.errMsg,
-		StartedAt: t.startedAt,
+		ID:         t.id,
+		Backend:    t.backend,
+		Status:     t.status,
+		Result:     t.result,
+		Error:      t.errMsg,
+		StartedAt:  t.startedAt,
+		Transcript: t.transcript,
 	}
 	if !t.finishedAt.IsZero() {
 		fin := t.finishedAt
