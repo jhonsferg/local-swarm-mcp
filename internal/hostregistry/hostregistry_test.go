@@ -34,7 +34,7 @@ func TestRegisterAndListHosts(t *testing.T) {
 	}
 }
 
-func TestUnregisterHost_RemovesHostAndModels(t *testing.T) {
+func TestUnregisterHost_RemovesHost(t *testing.T) {
 	r := openTestRegistry(t)
 	host := Host{Name: "rx9070", BaseURL: "http://192.168.18.29:11434"}
 	if err := r.RegisterHost(host); err != nil {
@@ -60,7 +60,7 @@ func TestUnregisterHost_RemovesHostAndModels(t *testing.T) {
 	}
 }
 
-func TestRecordPoll_SuccessUpdatesStatusAndPersistsModels(t *testing.T) {
+func TestRecordPoll_SuccessUpdatesStatus(t *testing.T) {
 	r := openTestRegistry(t)
 	host := Host{Name: "rx9070", BaseURL: "http://192.168.18.29:11434"}
 	if err := r.RegisterHost(host); err != nil {
@@ -84,6 +84,31 @@ func TestRecordPoll_SuccessUpdatesStatusAndPersistsModels(t *testing.T) {
 	}
 	if st.LastErr != "" {
 		t.Fatalf("st.LastErr = %q, want empty", st.LastErr)
+	}
+}
+
+func TestRecordPoll_SuccessReplacesModelsEntirely(t *testing.T) {
+	// A model no longer present on the host (e.g. deleted locally) must
+	// stop showing up as of the very next successful poll - nothing here
+	// should linger from an earlier poll's result.
+	r := openTestRegistry(t)
+	host := Host{Name: "rx9070", BaseURL: "http://192.168.18.29:11434"}
+	if err := r.RegisterHost(host); err != nil {
+		t.Fatalf("RegisterHost: %v", err)
+	}
+	if err := r.RecordPoll(host.Name, []Model{{Name: "gemma4:12b"}, {Name: "qwen3.5:latest"}}, nil); err != nil {
+		t.Fatalf("RecordPoll (first): %v", err)
+	}
+	if err := r.RecordPoll(host.Name, []Model{{Name: "gemma4:12b"}}, nil); err != nil {
+		t.Fatalf("RecordPoll (second): %v", err)
+	}
+
+	st, ok := r.StatusOf(host.Name)
+	if !ok {
+		t.Fatalf("StatusOf: not found")
+	}
+	if len(st.Models) != 1 || st.Models[0].Name != "gemma4:12b" {
+		t.Fatalf("st.Models = %+v, want only [gemma4:12b] - qwen3.5:latest should be gone", st.Models)
 	}
 }
 
@@ -113,11 +138,11 @@ func TestRecordPoll_FailureMarksDownButKeepsLastKnownModels(t *testing.T) {
 		t.Fatalf("st.LastErr = %q, want %q", st.LastErr, pollErr.Error())
 	}
 	if len(st.Models) != 1 || st.Models[0].Name != "gemma4:12b" {
-		t.Fatalf("st.Models = %+v, want the last known models preserved", st.Models)
+		t.Fatalf("st.Models = %+v, want the last known models preserved in memory", st.Models)
 	}
 }
 
-func TestOpen_ReloadsPreviouslyRegisteredHosts(t *testing.T) {
+func TestOpen_ReloadsHostsButNotModels(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hosts.db")
 
 	r1, err := Open(path)
@@ -143,9 +168,14 @@ func TestOpen_ReloadsPreviouslyRegisteredHosts(t *testing.T) {
 
 	st, ok := r2.StatusOf(host.Name)
 	if !ok {
-		t.Fatalf("StatusOf after reopen: not found")
+		t.Fatalf("StatusOf after reopen: host not found")
 	}
-	if len(st.Models) != 1 || st.Models[0].Name != "gemma4:12b" {
-		t.Fatalf("st.Models after reopen = %+v, want [gemma4:12b]", st.Models)
+	if st.BaseURL != host.BaseURL {
+		t.Fatalf("st.BaseURL after reopen = %q, want %q", st.BaseURL, host.BaseURL)
+	}
+	// Models are never persisted - only a real poll of the host's own API
+	// should ever populate them, never a restart reloading old state.
+	if len(st.Models) != 0 {
+		t.Fatalf("st.Models after reopen = %+v, want empty (models are never persisted)", st.Models)
 	}
 }

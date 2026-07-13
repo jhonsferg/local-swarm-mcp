@@ -76,20 +76,23 @@ func (p *Poller) PollOnce(ctx context.Context, h hostregistry.Host) {
 }
 
 func (p *Poller) pollOne(ctx context.Context, h hostregistry.Host) {
+	previous := lastKnownModels(p.Hosts, h.Name)
 	models, err := fetchTags(ctx, p.client, h)
-	_ = p.Hosts.RecordPoll(h.Name, modelsOrNil(models, err), err)
+	_ = p.Hosts.RecordPoll(h.Name, models, err)
 
 	if err != nil {
 		// Host unreachable (e.g. powered off): drop its synthesized
 		// backends so nothing tries to dispatch work there, but keep the
 		// host registered - it may come back on the next poll.
-		for _, m := range lastKnownModels(p.Hosts, h.Name) {
+		for _, m := range previous {
 			p.Backends.Remove(backendName(h.Name, m.Name))
 		}
 		return
 	}
 
+	current := make(map[string]bool, len(models))
 	for _, m := range models {
+		current[m.Name] = true
 		p.Backends.Put(config.Backend{
 			Name:    backendName(h.Name, m.Name),
 			BaseURL: strings.TrimRight(h.BaseURL, "/") + "/v1",
@@ -97,13 +100,15 @@ func (p *Poller) pollOne(ctx context.Context, h hostregistry.Host) {
 			APIKey:  h.APIKey,
 		})
 	}
-}
 
-func modelsOrNil(models []hostregistry.Model, err error) []hostregistry.Model {
-	if err != nil {
-		return nil
+	// A model that was here on the previous poll but isn't anymore (e.g.
+	// deleted locally on the host) must stop being a usable backend as of
+	// this very poll, not linger until the host goes fully unreachable.
+	for _, m := range previous {
+		if !current[m.Name] {
+			p.Backends.Remove(backendName(h.Name, m.Name))
+		}
 	}
-	return models
 }
 
 func lastKnownModels(hosts *hostregistry.Registry, hostName string) []hostregistry.Model {
