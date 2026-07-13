@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/jhonsferg/local-swarm-mcp/internal/authmw"
 	"github.com/jhonsferg/local-swarm-mcp/internal/backend"
 	"github.com/jhonsferg/local-swarm-mcp/internal/config"
+	"github.com/jhonsferg/local-swarm-mcp/internal/mcpdownstream"
 	"github.com/jhonsferg/local-swarm-mcp/internal/orchestrator"
 	"github.com/jhonsferg/local-swarm-mcp/internal/store"
 	"github.com/jhonsferg/local-swarm-mcp/internal/tools"
@@ -78,8 +80,18 @@ func run() error {
 	taskRegistry := orchestrator.NewTaskRegistry(client, registry)
 	sessionRegistry := orchestrator.NewSessionRegistry(client, registry)
 
+	downstream, err := mcpdownstream.Connect(context.Background(), cfg.MCPServers)
+	if err != nil {
+		// Non-fatal: a misconfigured downstream server shouldn't prevent
+		// the rest of the server (delegate_task, sessions, scratch store,
+		// any downstream server that DID connect) from working. Agent
+		// tasks pointed at the failed server will simply find no tools.
+		fmt.Fprintln(os.Stderr, "local-swarm-mcp: warning:", err)
+	}
+	defer downstream.Close()
+
 	mcpServer := server.NewMCPServer("local-swarm-mcp", version)
-	registerTools(mcpServer, registry, client, scratchStore, taskRegistry, sessionRegistry)
+	registerTools(mcpServer, registry, client, scratchStore, taskRegistry, sessionRegistry, downstream)
 
 	switch *transport {
 	case "stdio":
@@ -135,6 +147,7 @@ func registerTools(
 	scratchStore *store.Store,
 	taskRegistry *orchestrator.TaskRegistry,
 	sessionRegistry *orchestrator.SessionRegistry,
+	downstream *mcpdownstream.Manager,
 ) {
 	backendTools := &tools.Backends{Registry: registry}
 	delegator := &tools.Delegator{Registry: registry, Client: client}
@@ -142,6 +155,7 @@ func registerTools(
 	scratch := &tools.Scratch{Store: scratchStore}
 	taskTools := &tools.Tasks{Registry: taskRegistry}
 	sessionTools := &tools.Sessions{Registry: sessionRegistry}
+	agentTools := &tools.Agents{TaskRegistry: taskRegistry, Downstream: downstream}
 
 	s.AddTool(tools.ListBackendsTool(), backendTools.ListBackendsHandler)
 	s.AddTool(tools.HealthCheckTool(), backendTools.HealthCheckHandler)
@@ -163,6 +177,8 @@ func registerTools(
 	s.AddTool(tools.SessionHistoryTool(), sessionTools.SessionHistoryHandler)
 	s.AddTool(tools.CloseSessionTool(), sessionTools.CloseSessionHandler)
 	s.AddTool(tools.ListSessionsTool(), sessionTools.ListSessionsHandler)
+	s.AddTool(tools.SpawnAgentTaskTool(), agentTools.SpawnAgentTaskHandler)
+	s.AddTool(tools.ListAvailableAgentToolsTool(), agentTools.ListAvailableAgentToolsHandler)
 }
 
 func defaultConfigPath() string {

@@ -46,13 +46,15 @@ flowchart LR
         direction TB
         B["MCP Tools<br/>(stdio / HTTP)"]
         C["Backend Registry"]
-        D["Task Registry<br/>(async)"]
+        D["Task Registry<br/>(async + agent loop)"]
         E["Session Registry<br/>(multi-turn)"]
         F["Scratch Store<br/>(bbolt)"]
+        M["Downstream MCP<br/>client manager"]
         B --> C
         B --> D
         B --> E
         B --> F
+        D --> M
     end
 
     subgraph Backends["⚙️ Inference Backends"]
@@ -61,15 +63,25 @@ flowchart LR
         I["vLLM /<br/>remote provider"]
     end
 
+    subgraph Downstream["🧩 Downstream MCP servers"]
+        J["codebase-memory-mcp"]
+        K["...other configured servers"]
+    end
+
     A <-->|"MCP protocol"| B
     C -->|"OpenAI-compatible API"| G
     C -->|"OpenAI-compatible API"| H
     C -->|"OpenAI-compatible API"| I
+    M <-->|"stdio MCP client"| J
+    M <-->|"stdio MCP client"| K
 ```
 
 Every backend just speaks the OpenAI `/v1/chat/completions` + `/v1/models`
 shape, so the server never hardcodes vLLM/llama.cpp/Ollama-specific logic.
-Adding a new provider is a config-file edit, not a code change.
+Adding a new provider is a config-file edit, not a code change. The downstream
+MCP client manager lets a `spawn_agent_task` agent call other MCP servers'
+tools autonomously, in a loop, the same way a host application calls its
+own tools - see [Tool-using agents](#-tool-using-agents-autonomous-like-a-host-applications-own-agents).
 
 ## 🤝 Expected client behavior: check availability, then prefer this over native agents
 
@@ -321,6 +333,45 @@ isolate (e.g. a home LAN with no other untrusted devices).
 | `list_tasks` | List every task spawned this server run |
 | `cancel_task` | Cancel a still-running task |
 
+### 🧑‍🔧 Tool-using agents (autonomous, like a host application's own agents)
+| Tool | Purpose |
+|---|---|
+| `spawn_agent_task` | Start a background agent that can call tools from configured downstream MCP servers (`mcp_servers` in config) in a loop before answering, tracked via the same `task_status`/`wait_task`/`list_tasks`/`cancel_task` tools above. The result includes a full transcript of every tool call made, for auditing. |
+| `list_available_agent_tools` | List every tool discovered from configured downstream MCP servers (namespaced `<server>__<tool>`) that an agent could invoke |
+
+⚠️ **Requires a tool-calling-capable model.** Not every model that claims
+"tools" support actually produces a real structured `tool_calls` response.
+Verified on this project:
+
+| Model | Real `tool_calls`? |
+|---|---|
+| `llama3.1:8b` (Ollama) | ✅ Yes |
+| `qwen2.5-coder:7b` (Ollama) | ❌ No - prints tool-call-shaped JSON as plain text |
+| `qwen2.5-coder:1.5b` (Ollama) | ❌ No - same failure mode |
+
+Test a new model with a trivial tool schema before relying on it for
+`spawn_agent_task` - a model that fails silently prints its "call" as text
+and the loop just treats it as (probably wrong) final output.
+
+Example config wiring `codebase-memory-mcp` (installed earlier, see its own
+docs) as a downstream server:
+```yaml
+backends:
+  - name: agent-model
+    base_url: http://localhost:11434/v1
+    model: llama3.1:8b
+
+mcp_servers:
+  - name: codebase-memory-mcp
+    command: /path/to/codebase-memory-mcp
+```
+
+🔒 Downstream tool access is opt-in and configured per server; `codebase-memory-mcp`
+is a good reference integration because its tools are read-only (indexing
+and querying, no writes). Think carefully before pointing an agent task at
+a downstream server with write/destructive tools - the model driving it may
+be far less reliable than the client that configured it.
+
 ### 💬 Sessions (persistent multi-turn conversations, like resuming a named agent)
 | Tool | Purpose |
 |---|---|
@@ -357,11 +408,15 @@ drop `-race` for local runs - CI still runs it on all three OSes.
 
 ## 📌 Status
 
-v0.1 - core delegation, task orchestration, sessions, and context tools are
-in place. Verified end-to-end over stdio against a real Ollama backend
-(`qwen2.5-coder:1.5b`) on a 6GB-VRAM laptop GPU: all 20 tools registered and
-responded correctly, including a full spawn/wait task round-trip and a
-multi-turn session.
+v0.2 - core delegation, task orchestration, sessions, context tools, and
+tool-using agents are all in place. Verified end-to-end over stdio against
+a real Ollama backend on a 6GB-VRAM laptop GPU:
+- v0.1: all 20 tools registered and responded correctly against `qwen2.5-coder:1.5b`,
+  including a full spawn/wait task round-trip and a multi-turn session.
+- v0.2: a `spawn_agent_task` run against `llama3.1:8b`, with `codebase-memory-mcp`
+  wired in as a downstream server, correctly called `index_repository` on
+  this repo and reported the real result (288 nodes, 937 edges) rather than
+  a hallucinated one, with the tool call recorded in the task's transcript.
 
 ## 📄 License
 

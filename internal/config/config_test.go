@@ -26,6 +26,27 @@ func TestLoad_YAML(t *testing.T) {
 	}
 }
 
+func TestLoad_MCPServers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := "backends:\n  - name: local\n    base_url: http://localhost:8080/v1\n    model: qwen\n" +
+		"mcp_servers:\n  - name: codebase-memory-mcp\n    command: /path/to/codebase-memory-mcp\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path, "")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.MCPServers) != 1 {
+		t.Fatalf("expected 1 mcp_server, got %d", len(cfg.MCPServers))
+	}
+	if cfg.MCPServers[0].Name != "codebase-memory-mcp" || cfg.MCPServers[0].Command != "/path/to/codebase-memory-mcp" {
+		t.Fatalf("unexpected mcp_server: %+v", cfg.MCPServers[0])
+	}
+}
+
 func TestLoad_JSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
