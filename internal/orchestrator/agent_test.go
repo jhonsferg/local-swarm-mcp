@@ -105,7 +105,7 @@ func TestAgentTask_CallsToolThenAnswers(t *testing.T) {
 	mgr := fakeIndexManager(t)
 
 	tr := NewTaskRegistry(backend.NewClient(), testRegistry(srv.URL))
-	id, err := tr.SpawnAgent("", "you are terse", "index D:/repo", mgr, nil, 8, 64, 0.1)
+	id, err := tr.SpawnAgent("", "you are terse", "index D:/repo", mgr, nil, 8, 64, 0.1, 0)
 	if err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestAgentTask_MaxIterationsGivesUp(t *testing.T) {
 	mgr := fakeIndexManager(t)
 
 	tr := NewTaskRegistry(backend.NewClient(), testRegistry(srv.URL))
-	id, err := tr.SpawnAgent("", "", "loop forever", mgr, nil, 3, 64, 0.1)
+	id, err := tr.SpawnAgent("", "", "loop forever", mgr, nil, 3, 64, 0.1, 0)
 	if err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestAgentTask_MaxIterationsGivesUp(t *testing.T) {
 func TestAgentTask_UnknownBackend(t *testing.T) {
 	mgr := fakeIndexManager(t)
 	tr := NewTaskRegistry(backend.NewClient(), backend.NewRegistry(nil))
-	if _, err := tr.SpawnAgent("nope", "", "hi", mgr, nil, 8, 64, 0.1); err == nil {
+	if _, err := tr.SpawnAgent("nope", "", "hi", mgr, nil, 8, 64, 0.1, 0); err == nil {
 		t.Fatal("expected an error for an unknown backend")
 	}
 }

@@ -37,7 +37,7 @@ func (tr *TaskRegistry) SpawnAgent(
 	mgr *mcpdownstream.Manager,
 	serverFilter []string,
 	maxIterations, maxTokens int,
-	temperature float64,
+	temperature, topP float64,
 ) (string, error) {
 	cfg, err := tr.registry.Get(backendName)
 	if err != nil {
@@ -55,7 +55,7 @@ func (tr *TaskRegistry) SpawnAgent(
 	tr.tasks[id] = t
 	tr.mu.Unlock()
 
-	go tr.runAgent(ctx, t, systemPrompt, prompt, mgr, serverFilter, maxIterations, maxTokens, temperature)
+	go tr.runAgent(ctx, t, systemPrompt, prompt, mgr, serverFilter, maxIterations, maxTokens, temperature, topP)
 
 	return id, nil
 }
@@ -67,7 +67,7 @@ func (tr *TaskRegistry) runAgent(
 	mgr *mcpdownstream.Manager,
 	serverFilter []string,
 	maxIterations, maxTokens int,
-	temperature float64,
+	temperature, topP float64,
 ) {
 	tr.mu.Lock()
 	t.status = TaskRunning
@@ -94,7 +94,7 @@ func (tr *TaskRegistry) runAgent(
 	var transcript []ToolCallRecord
 
 	for i := 0; i < maxIterations; i++ {
-		result, err := tr.client.CompleteWithTools(ctx, cfg, messages, toolSpecs, maxTokens, temperature)
+		result, err := tr.client.CompleteWithTools(ctx, cfg, messages, toolSpecs, maxTokens, temperature, topP)
 		if err != nil {
 			tr.finish(t, "", transcript, err, ctx)
 			return

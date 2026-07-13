@@ -72,7 +72,7 @@ func (sr *SessionRegistry) get(id string) (*session, error) {
 
 // Send appends message to the session's history, sends the full transcript
 // to the backend, and appends the reply before returning it.
-func (sr *SessionRegistry) Send(ctx context.Context, id, message string, maxTokens int, temperature float64) (string, error) {
+func (sr *SessionRegistry) Send(ctx context.Context, id, message string, maxTokens int, temperature, topP float64) (string, error) {
 	s, err := sr.get(id)
 	if err != nil {
 		return "", err
@@ -93,7 +93,7 @@ func (sr *SessionRegistry) Send(ctx context.Context, id, message string, maxToke
 	messages = append(messages, s.history...)
 	messages = append(messages, backend.ChatMessage{Role: "user", Content: message})
 
-	reply, err := sr.client.Complete(ctx, cfg, messages, maxTokens, temperature)
+	reply, err := sr.client.Complete(ctx, cfg, messages, maxTokens, temperature, topP)
 	if err != nil {
 		return "", err
 	}

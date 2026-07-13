@@ -72,7 +72,7 @@ func NewTaskRegistry(client *backend.Client, registry *backend.Registry) *TaskRe
 
 // Spawn starts a task against backendName (or the default backend, if
 // empty) in the background and returns its ID immediately.
-func (tr *TaskRegistry) Spawn(backendName, systemPrompt, prompt string, maxTokens int, temperature float64) (string, error) {
+func (tr *TaskRegistry) Spawn(backendName, systemPrompt, prompt string, maxTokens int, temperature, topP float64) (string, error) {
 	cfg, err := tr.registry.Get(backendName)
 	if err != nil {
 		return "", err
@@ -86,12 +86,12 @@ func (tr *TaskRegistry) Spawn(backendName, systemPrompt, prompt string, maxToken
 	tr.tasks[id] = t
 	tr.mu.Unlock()
 
-	go tr.run(ctx, t, systemPrompt, prompt, maxTokens, temperature)
+	go tr.run(ctx, t, systemPrompt, prompt, maxTokens, temperature, topP)
 
 	return id, nil
 }
 
-func (tr *TaskRegistry) run(ctx context.Context, t *task, systemPrompt, prompt string, maxTokens int, temperature float64) {
+func (tr *TaskRegistry) run(ctx context.Context, t *task, systemPrompt, prompt string, maxTokens int, temperature, topP float64) {
 	tr.mu.Lock()
 	t.status = TaskRunning
 	tr.mu.Unlock()
@@ -108,7 +108,7 @@ func (tr *TaskRegistry) run(ctx context.Context, t *task, systemPrompt, prompt s
 	}
 	messages = append(messages, backend.ChatMessage{Role: "user", Content: prompt})
 
-	result, err := tr.client.Complete(ctx, cfg, messages, maxTokens, temperature)
+	result, err := tr.client.Complete(ctx, cfg, messages, maxTokens, temperature, topP)
 	tr.finish(t, result, nil, err, ctx)
 }
 
