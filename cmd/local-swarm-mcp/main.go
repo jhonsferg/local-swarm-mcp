@@ -32,6 +32,7 @@ import (
 	"github.com/jhonsferg/local-swarm-mcp/internal/tools"
 	"github.com/jhonsferg/local-swarm-mcp/internal/webui"
 	"github.com/mark3labs/mcp-go/server"
+	bolt "go.etcd.io/bbolt"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=vX.Y.Z"
@@ -101,16 +102,12 @@ func run() error {
 	if cfg.StorePath == "" {
 		cfg.StorePath = config.DefaultStorePath()
 	}
-	// The persistent daemon (-transport http, including via -register-host)
-	// can start with zero statically/ad-hoc configured backends - that's
-	// the whole point of host discovery: register one afterward, via
-	// -register-host, the dashboard, or an MCP tool call, with no
-	// restart. Only a one-shot -transport stdio run (no daemon, no
-	// discovery loop to add one later) actually needs a backend already
-	// configured up front.
-	if len(cfg.Backends) == 0 && !*registerHost && *transport != "http" {
-		return fmt.Errorf("no backends configured: provide -backend-url/-backend-model for an ad-hoc backend, or use -transport=http to run the daemon and register one afterward")
-	}
+	// Zero backends at startup is fine for every transport: register one
+	// afterward via -register-host, the dashboard, or an MCP tool call
+	// (wireDynamicToolsForStdio below gives -transport stdio the same
+	// register_backend_host/register_downstream_mcp_server tools the
+	// daemon has, backed by the same persisted store), all with no
+	// restart needed.
 
 	scratchStore, err := store.Open(cfg.StorePath)
 	if err != nil {
@@ -154,11 +151,80 @@ func run() error {
 
 	switch *transport {
 	case "stdio":
+		cleanup := wireDynamicToolsForStdio(mcpServer, registry, downstream, daemonCfg)
+		defer cleanup()
 		return server.ServeStdio(mcpServer)
 	case "http":
 		return serveDaemon(mcpServer, registry, downstream, daemonCfg)
 	default:
 		return fmt.Errorf("unknown -transport %q (want \"stdio\" or \"http\")", *transport)
+	}
+}
+
+// wireDynamicToolsForStdio gives a -transport stdio session the same
+// register_backend_host/unregister_backend_host/list_backend_hosts and
+// register_downstream_mcp_server/unregister/list tools the HTTP daemon
+// has, backed by the same persisted stores (cfg.hostStorePath /
+// cfg.mcpServerStorePath) and a background poller - so a bare `local-swarm-mcp`
+// invocation (no daemon, no flags) can still add inference hardware and
+// downstream MCP servers progressively, through the MCP connection itself,
+// exactly like the daemon's tools/dashboard/-register-host CLI do.
+//
+// This is opportunistic, not exclusive: unlike the daemon (which goes
+// through leader election first), a stdio session doesn't try to become
+// the one true owner of these stores - it just tries to open them with a
+// short timeout, and quietly does without these tools if something else
+// (typically an already-running -transport http daemon) holds the lock,
+// rather than delaying MCP startup or erroring out. The MCP client still
+// gets every other tool either way; only host/MCP-server management is
+// affected, and only when a store is already exclusively held elsewhere.
+func wireDynamicToolsForStdio(
+	mcpServer *server.MCPServer,
+	registry *backend.Registry,
+	downstream *mcpdownstream.Manager,
+	cfg daemonConfig,
+) (cleanup func()) {
+	noop := func() {}
+
+	const lockTimeout = 500 * time.Millisecond
+	openOpts := &bolt.Options{Timeout: lockTimeout}
+
+	hostReg, err := hostregistry.OpenWithOptions(cfg.hostStorePath, openOpts)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "local-swarm-mcp: host discovery unavailable this session (store busy, likely held by a running -transport http daemon):", err)
+		return noop
+	}
+
+	mcpServerReg, err := mcpserverregistry.OpenWithOptions(cfg.mcpServerStorePath, openOpts)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "local-swarm-mcp: downstream MCP server management unavailable this session (store busy, likely held by a running -transport http daemon):", err)
+		_ = hostReg.Close()
+		return noop
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reconnectPersistedServers(ctx, mcpServerReg, downstream, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	poller := discovery.NewPoller(hostReg, registry)
+	poller.Interval = cfg.pollInterval
+	go poller.Run(ctx)
+
+	triggerPoll := func(ctx context.Context, host hostregistry.Host) { poller.PollOnce(ctx, host) }
+
+	hostTools := &tools.Hosts{Registry: hostReg, OnRegistered: triggerPoll}
+	mcpServer.AddTool(tools.RegisterBackendHostTool(), hostTools.RegisterBackendHostHandler)
+	mcpServer.AddTool(tools.UnregisterBackendHostTool(), hostTools.UnregisterBackendHostHandler)
+	mcpServer.AddTool(tools.ListBackendHostsTool(), hostTools.ListBackendHostsHandler)
+
+	mcpServerTools := &tools.MCPServers{Registry: mcpServerReg, Downstream: downstream}
+	mcpServer.AddTool(tools.RegisterDownstreamMCPServerTool(), mcpServerTools.RegisterDownstreamMCPServerHandler)
+	mcpServer.AddTool(tools.UnregisterDownstreamMCPServerTool(), mcpServerTools.UnregisterDownstreamMCPServerHandler)
+	mcpServer.AddTool(tools.ListDownstreamMCPServersTool(), mcpServerTools.ListDownstreamMCPServersHandler)
+
+	return func() {
+		cancel()
+		_ = hostReg.Close()
+		_ = mcpServerReg.Close()
 	}
 }
 
@@ -214,13 +280,20 @@ func serveDaemon(
 	defer func() { _ = closeLog() }()
 	logger.Info("daemon starting", "addr", cfg.addr, "ui", cfg.ui)
 
-	hostReg, err := hostregistry.Open(cfg.hostStorePath)
+	// A generous but bounded timeout: normally nothing else holds these
+	// files, so this opens immediately either way, but a stdio session
+	// started earlier may be opportunistically sharing the same store
+	// (see wireDynamicToolsForStdio) - fail with a clear error after a
+	// few seconds instead of hanging forever waiting for it to close.
+	storeOpenOpts := &bolt.Options{Timeout: 5 * time.Second}
+
+	hostReg, err := hostregistry.OpenWithOptions(cfg.hostStorePath, storeOpenOpts)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = hostReg.Close() }()
 
-	mcpServerReg, err := mcpserverregistry.Open(cfg.mcpServerStorePath)
+	mcpServerReg, err := mcpserverregistry.OpenWithOptions(cfg.mcpServerStorePath, storeOpenOpts)
 	if err != nil {
 		return err
 	}
@@ -502,8 +575,9 @@ primary, config-file-free way to run local-swarm-mcp now):
   -config-format string
         force "yaml" or "json" parsing (default: auto-detect from -config's extension)
 
-Ad-hoc backend (added on top of any config-file backends; at least one
-backend must end up configured, from either source):
+Ad-hoc backend (added on top of any config-file backends; entirely
+optional - zero backends configured at startup is fine, add one later via
+register_backend_host, -register-host, or the dashboard):
   -backend-name string
         name for the ad-hoc backend (default "cli")
   -backend-url string

@@ -64,15 +64,26 @@ type Registry struct {
 
 // Open opens (creating if needed) the bbolt database at path and loads any
 // previously registered hosts into the live status map (as not-yet-polled,
-// Up=false, no models, until the poller's first check).
+// Up=false, no models, until the poller's first check). Blocks indefinitely
+// if another process already holds the file lock - see OpenWithOptions to
+// bound that wait.
 func Open(path string) (*Registry, error) {
+	return OpenWithOptions(path, nil)
+}
+
+// OpenWithOptions is Open with caller-supplied bbolt options - notably
+// Options.Timeout, so a caller that may race another local-swarm-mcp
+// process for this same store (e.g. a stdio session opportunistically
+// sharing the daemon's store) can fail fast instead of hanging forever
+// waiting for the other process to release the file lock.
+func OpenWithOptions(path string, opts *bolt.Options) (*Registry, error) {
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create host registry directory: %w", err)
 		}
 	}
 
-	db, err := bolt.Open(path, 0o600, nil)
+	db, err := bolt.Open(path, 0o600, opts)
 	if err != nil {
 		return nil, fmt.Errorf("open host registry: %w", err)
 	}
