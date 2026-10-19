@@ -183,6 +183,10 @@ func (s *Server) handleRegisterMCPServer(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.AllowCommandRegistration {
+		http.Error(w, "registering downstream MCP servers is disabled on this daemon (start it with -allow-command-registration to enable)", http.StatusForbidden)
+		return
+	}
 	var req RegisterMCPServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
