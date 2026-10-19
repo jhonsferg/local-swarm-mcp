@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jhonsferg/local-swarm-mcp/internal/config"
@@ -83,12 +84,15 @@ type CompletionResult struct {
 }
 
 type chatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Tools       []ToolSpec    `json:"tools,omitempty"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
-	Temperature float64       `json:"temperature,omitempty"`
-	TopP        float64       `json:"top_p,omitempty"`
+	Model     string        `json:"model"`
+	Messages  []ChatMessage `json:"messages"`
+	Tools     []ToolSpec    `json:"tools,omitempty"`
+	MaxTokens int           `json:"max_tokens,omitempty"`
+	// Temperature is always sent: 0 is a meaningful value (greedy,
+	// deterministic decoding), not "unset" - with omitempty it was silently
+	// dropped, so the backend applied its own non-zero default instead.
+	Temperature float64 `json:"temperature"`
+	TopP        float64 `json:"top_p,omitempty"`
 }
 
 type chatResponse struct {
@@ -100,17 +104,74 @@ type chatResponse struct {
 	} `json:"error,omitempty"`
 }
 
+// DefaultTimeout bounds a single chat completion when ClientOptions
+// doesn't set one: generous enough for local inference on modest hardware.
+const DefaultTimeout = 120 * time.Second
+
+// maxResponseBytes caps how much of a backend's response body is read, so
+// a misbehaving or hostile endpoint can't exhaust memory.
+const maxResponseBytes = 32 << 20 // 32 MiB
+
+// ClientOptions configures a Client.
+type ClientOptions struct {
+	// Timeout bounds each completion request; 0 means DefaultTimeout.
+	Timeout time.Duration
+	// MaxConcurrentPerBackend caps in-flight completions per backend base
+	// URL (every "<host>/<model>" on one Ollama host shares one GPU, so
+	// they share one limit); 0 means unlimited. Requests over the limit
+	// wait their turn, bounded by their own context.
+	MaxConcurrentPerBackend int
+}
+
 // Client is a minimal client for the OpenAI-compatible chat-completions API
 // implemented by llama.cpp's llama-server, Ollama, vLLM, and most hosted
 // providers.
 type Client struct {
-	httpClient *http.Client
+	httpClient    *http.Client
+	maxPerBackend int
+
+	mu    sync.Mutex
+	slots map[string]chan struct{} // base URL -> concurrency semaphore
 }
 
-// NewClient builds a Client with a generous timeout suitable for local
-// inference on modest hardware.
+// NewClient builds a Client with DefaultTimeout and no concurrency limit.
 func NewClient() *Client {
-	return &Client{httpClient: &http.Client{Timeout: 120 * time.Second}}
+	return NewClientWithOptions(ClientOptions{})
+}
+
+// NewClientWithOptions builds a Client from opts.
+func NewClientWithOptions(opts ClientOptions) *Client {
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	return &Client{
+		httpClient:    &http.Client{Timeout: timeout},
+		maxPerBackend: opts.MaxConcurrentPerBackend,
+		slots:         make(map[string]chan struct{}),
+	}
+}
+
+// acquire waits for a free completion slot on baseURL, returning the
+// func that frees it.
+func (c *Client) acquire(ctx context.Context, baseURL string) (release func(), err error) {
+	if c.maxPerBackend <= 0 {
+		return func() {}, nil
+	}
+	c.mu.Lock()
+	slot, ok := c.slots[baseURL]
+	if !ok {
+		slot = make(chan struct{}, c.maxPerBackend)
+		c.slots[baseURL] = slot
+	}
+	c.mu.Unlock()
+
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // Complete sends messages to the given backend and returns the assistant's
@@ -153,6 +214,12 @@ func (c *Client) CompleteWithTools(ctx context.Context, b config.Backend, messag
 		return CompletionResult{}, fmt.Errorf("marshal request: %w", err)
 	}
 
+	release, err := c.acquire(ctx, b.BaseURL)
+	if err != nil {
+		return CompletionResult{}, fmt.Errorf("wait for a free slot on backend %q: %w", b.Name, err)
+	}
+	defer release()
+
 	url := strings.TrimSuffix(b.BaseURL, "/") + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
@@ -169,7 +236,7 @@ func (c *Client) CompleteWithTools(ctx context.Context, b config.Backend, messag
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return CompletionResult{}, fmt.Errorf("read response from backend %q: %w", b.Name, err)
 	}
