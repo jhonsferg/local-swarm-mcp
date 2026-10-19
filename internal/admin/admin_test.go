@@ -135,7 +135,7 @@ func TestHandleListHosts(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	var got []hostregistry.HostStatus
+	var got []hostregistry.HostView
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestHandleUnregisterHost(t *testing.T) {
 }
 
 func TestHandleRegisterMCPServer_RequiresNameAndCommand(t *testing.T) {
-	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: openTestMCPServers(t), Downstream: newTestDownstream(t)}
+	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: openTestMCPServers(t), Downstream: newTestDownstream(t), AllowCommandRegistration: true}
 	body, _ := json.Marshal(RegisterMCPServerRequest{Name: "codebase-memory-mcp"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/register-mcp-server", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -185,7 +185,7 @@ func TestHandleRegisterMCPServer_RequiresNameAndCommand(t *testing.T) {
 
 func TestHandleRegisterMCPServer_PersistsEvenIfConnectFails(t *testing.T) {
 	mcpServers := openTestMCPServers(t)
-	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: mcpServers, Downstream: newTestDownstream(t)}
+	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: mcpServers, Downstream: newTestDownstream(t), AllowCommandRegistration: true}
 
 	body, _ := json.Marshal(RegisterMCPServerRequest{Name: "nonexistent", Command: "this-binary-does-not-exist-xyz"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/register-mcp-server", bytes.NewReader(body))
@@ -212,7 +212,7 @@ func TestHandleUnregisterMCPServer(t *testing.T) {
 	if err := mcpServers.Register(mcpserverregistry.Server{Name: "codebase-memory-mcp", Command: "cmd"}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: mcpServers, Downstream: newTestDownstream(t)}
+	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: mcpServers, Downstream: newTestDownstream(t), AllowCommandRegistration: true}
 
 	body, _ := json.Marshal(map[string]string{"name": "codebase-memory-mcp"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/unregister-mcp-server", bytes.NewReader(body))
@@ -237,7 +237,7 @@ func TestHandleListMCPServers(t *testing.T) {
 	if err := mcpServers.Register(mcpserverregistry.Server{Name: "codebase-memory-mcp", Command: "cmd"}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: mcpServers, Downstream: newTestDownstream(t)}
+	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: mcpServers, Downstream: newTestDownstream(t), AllowCommandRegistration: true}
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/mcp-servers", nil)
 	rec := httptest.NewRecorder()
@@ -316,5 +316,102 @@ func TestHandleLogs_StreamsRecentThenLive(t *testing.T) {
 
 	if len(events) < 1 || events[0] != "past line" {
 		t.Fatalf("events = %+v, want the first to be the pre-existing history line", events)
+	}
+}
+
+func TestHandleUnregisterHost_UsesUnregisterHostHook(t *testing.T) {
+	hosts := openTestHosts(t)
+	if err := hosts.RegisterHost(hostregistry.Host{Name: "rx9070", BaseURL: "http://192.168.18.29:11434"}); err != nil {
+		t.Fatalf("RegisterHost: %v", err)
+	}
+	var got string
+	s := &Server{Version: "dev", Hosts: hosts, UnregisterHost: func(name string) error {
+		got = name
+		return hosts.UnregisterHost(name)
+	}}
+
+	body, _ := json.Marshal(map[string]string{"name": "rx9070"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/unregister-host", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", rec.Code)
+	}
+	if got != "rx9070" {
+		t.Fatalf("UnregisterHost hook called with %q, want rx9070", got)
+	}
+}
+
+func TestHandler_RejectsNonJSONPost(t *testing.T) {
+	// Reproduces a confirmed vulnerability: a text/plain POST - which a
+	// browser sends cross-site without any CORS preflight - used to be
+	// decoded and acted on.
+	s := &Server{Version: "dev", Hosts: openTestHosts(t)}
+	body := `{"name":"evil","base_url":"http://127.0.0.1:1"}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/register-host", strings.NewReader(body))
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", rec.Code)
+	}
+	if hosts, _ := s.Hosts.Hosts(); len(hosts) != 0 {
+		t.Fatalf("a rejected request must not register anything, got %+v", hosts)
+	}
+}
+
+func TestHandleHealth_ReportsCommandRegistration(t *testing.T) {
+	s := &Server{Version: "dev", Hosts: openTestHosts(t), AllowCommandRegistration: true}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/health", nil))
+	var got HealthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.CommandRegistration {
+		t.Fatalf("health = %+v, want command_registration=true", got)
+	}
+}
+
+func TestAdmin_NeverReturnsAPIKeys(t *testing.T) {
+	hosts := openTestHosts(t)
+	backends := backend.NewRegistry([]config.Backend{{Name: "remote", BaseURL: "https://api.example/v1", APIKey: "backend-secret"}})
+	s := &Server{Version: "dev", Hosts: hosts, Backends: backends}
+
+	body, _ := json.Marshal(RegisterHostRequest{Name: "rx9070", BaseURL: "http://192.168.18.29:11434", APIKey: "host-secret"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/register-host", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("register status = %d: %s", rec.Code, rec.Body.String())
+	}
+	responses := rec.Body.String()
+
+	for _, path := range []string{"/admin/hosts", "/admin/backends"} {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		responses += rec.Body.String()
+	}
+	for _, secret := range []string{"host-secret", "backend-secret"} {
+		if strings.Contains(responses, secret) {
+			t.Fatalf("admin responses leak %q: %s", secret, responses)
+		}
+	}
+	if !strings.Contains(responses, `"has_api_key":true`) {
+		t.Fatalf("responses should still say a key is set: %s", responses)
+	}
+
+	// Editing the host without re-sending its key keeps the stored key.
+	body, _ = json.Marshal(RegisterHostRequest{Name: "rx9070", BaseURL: "http://192.168.18.30:11434"})
+	req = httptest.NewRequest(http.MethodPost, "/admin/register-host", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	stored, _ := hosts.Hosts()
+	if len(stored) != 1 || stored[0].APIKey != "host-secret" || stored[0].BaseURL != "http://192.168.18.30:11434" {
+		t.Fatalf("stored host after keyless edit = %+v", stored)
 	}
 }
