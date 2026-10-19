@@ -19,7 +19,7 @@ type Compactor struct {
 // CompactContextTool returns the MCP tool definition for compact_context.
 func CompactContextTool() mcp.Tool {
 	return mcp.NewTool("compact_context",
-		mcp.WithDescription("Summarize/shrink a block of text (e.g. a large tool output or subagent report) using a local model, instead of letting it sit in Claude's own context uncompacted. Call estimate_tokens first to judge whether it's worth it."),
+		mcp.WithDescription("Summarize/shrink a block of text (e.g. a large tool output or subagent report) using a local model, instead of letting it sit uncompacted in your own context. Call estimate_tokens first to judge whether it's worth it."),
 		mcp.WithString("text", mcp.Required(), mcp.Description("Text to compact")),
 		mcp.WithNumber("target_tokens", mcp.DefaultNumber(500), mcp.Description("Approximate target length in tokens")),
 		mcp.WithString("preserve_instructions", mcp.Description("Optional extra instructions about what must be preserved (e.g. specific facts, numbers, file paths)")),
