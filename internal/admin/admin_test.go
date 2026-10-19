@@ -83,6 +83,7 @@ func TestHandleRegisterHost_TriggersOnRegistered(t *testing.T) {
 
 	body, _ := json.Marshal(RegisterHostRequest{Name: "rx9070", BaseURL: "http://192.168.18.29:11434"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/register-host", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	s.Handler().ServeHTTP(rec, req)
@@ -110,6 +111,7 @@ func TestHandleRegisterHost_RequiresNameAndBaseURL(t *testing.T) {
 	s := &Server{Version: "dev", Hosts: openTestHosts(t)}
 	body, _ := json.Marshal(RegisterHostRequest{Name: "rx9070"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/register-host", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	s.Handler().ServeHTTP(rec, req)
@@ -151,6 +153,7 @@ func TestHandleUnregisterHost(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"name": "rx9070"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/unregister-host", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 
@@ -170,6 +173,7 @@ func TestHandleRegisterMCPServer_RequiresNameAndCommand(t *testing.T) {
 	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: openTestMCPServers(t), Downstream: newTestDownstream(t)}
 	body, _ := json.Marshal(RegisterMCPServerRequest{Name: "codebase-memory-mcp"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/register-mcp-server", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	s.Handler().ServeHTTP(rec, req)
@@ -185,6 +189,7 @@ func TestHandleRegisterMCPServer_PersistsEvenIfConnectFails(t *testing.T) {
 
 	body, _ := json.Marshal(RegisterMCPServerRequest{Name: "nonexistent", Command: "this-binary-does-not-exist-xyz"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/register-mcp-server", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
 	s.Handler().ServeHTTP(rec, req)
@@ -211,6 +216,7 @@ func TestHandleUnregisterMCPServer(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"name": "codebase-memory-mcp"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/unregister-mcp-server", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, req)
 
