@@ -6,12 +6,66 @@ coverage.out
 config.yaml
 .idea/
 .vscode/
+.zed/
+*.swp
+.DS_Store
 
-# ui/ (Vue frontend) - node_modules and its own cache are never committed.
-# Its build output IS committed at internal/webui/dist (see that
-# package's doc comment): a bare `go build` must work on a fresh clone
-# without Node installed, so CI/goreleaser always rebuild it fresh before
-# compiling, but a checked-in baseline keeps go-only contributors unblocked.
+# Local toolchain version pins (gvsn, goenv, asdf, mise, ...) - each
+# developer's own choice; go.mod's "go" directive is the source of truth.
+.go-version
+.tool-versions
+.mise.toml
+
+# AI coding assistants: per-user/per-machine config, caches, rules, memory,
+# and MCP client configs (which may hold API keys). Never committed.
+# (skills/local-swarm/ is NOT here: it's a deliverable of this project.)
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+.cursor/
+.cursorrules
+.cursorignore
+.cursorindexingignore
+.windsurf/
+.windsurfrules
+.codeium/
+.codex/
+.agents/
+AGENTS.md
+AGENTS.override.md
+.opencode/
+opencode.json
+opencode.jsonc
+.gemini/
+GEMINI.md
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+.github/chatmodes/
+.github/skills/
+.continue/
+.aider*
+.clinerules
+.cline/
+.roo/
+.roomodes
+.kiro/
+.amazonq/
+.junie/
+.trae/
+.kilocode/
+.augment/
+.goose/
+.qwen/
+.crush/
+
+# ui/ (Vue frontend) - dependencies, caches, and build output are never
+# committed. The build lands in internal/webui/dist/app (see that
+# package's doc comment); only internal/webui/dist/.gitkeep is tracked so
+# go:embed compiles on a fresh clone. CI and the release workflow build
+# the dashboard before every binary they publish.
 ui/node_modules/
 ui/.vite/
 ui/tsconfig.tsbuildinfo
+internal/webui/dist/app/
