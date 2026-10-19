@@ -8,15 +8,25 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// Scratch bundles the store dependency the scratch_* tools need.
+// Scratch bundles the store dependency the scratch_* tools need: either an
+// already-open Store, or a Lazy one opened on first use (so a store held by
+// another local-swarm-mcp process only fails these calls, never startup).
 type Scratch struct {
 	Store *store.Store
+	Lazy  *store.Lazy
+}
+
+func (s *Scratch) open() (*store.Store, error) {
+	if s.Store != nil {
+		return s.Store, nil
+	}
+	return s.Lazy.Get()
 }
 
 // ScratchSetTool returns the MCP tool definition for scratch_set.
 func ScratchSetTool() mcp.Tool {
 	return mcp.NewTool("scratch_set",
-		mcp.WithDescription("Store a value under a key in a persistent local scratch space, outside Claude's own context. Use to stash large intermediate results you only need to reference, not re-read in full."),
+		mcp.WithDescription("Store a value under a key in a persistent local scratch space, outside your own context. Use to stash large intermediate results you only need to reference, not re-read in full."),
 		mcp.WithString("key", mcp.Required(), mcp.Description("Key to store under")),
 		mcp.WithString("value", mcp.Required(), mcp.Description("Value to store")),
 	)
@@ -32,7 +42,11 @@ func (s *Scratch) ScratchSetHandler(_ context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	if err := s.Store.Set(key, value); err != nil {
+	st, err := s.open()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if err := st.Set(key, value); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("stored %q (%d bytes)", key, len(value))), nil
@@ -52,7 +66,11 @@ func (s *Scratch) ScratchGetHandler(_ context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	value, ok, err := s.Store.Get(key)
+	st, err := s.open()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	value, ok, err := st.Get(key)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -71,7 +89,11 @@ func ScratchListTool() mcp.Tool {
 
 // ScratchListHandler lists all stored keys.
 func (s *Scratch) ScratchListHandler(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	keys, err := s.Store.List()
+	st, err := s.open()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	keys, err := st.List()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -92,7 +114,11 @@ func (s *Scratch) ScratchDeleteHandler(_ context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	if err := s.Store.Delete(key); err != nil {
+	st, err := s.open()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if err := st.Delete(key); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("deleted %q", key)), nil
