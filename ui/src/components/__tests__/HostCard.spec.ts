@@ -6,6 +6,7 @@ import type { HostStatus } from "@/types";
 const host: HostStatus = {
   name: "rx9070",
   base_url: "http://192.168.18.29:11434",
+  has_api_key: false,
   models: [{ name: "gemma4:12b", capabilities: ["tools"] }],
   up: true,
   last_seen: "2026-07-13T00:00:00Z",
@@ -45,5 +46,17 @@ describe("HostCard", () => {
     // Empty submit (fields already pre-filled from host, so this should
     // actually emit update since name/baseUrl aren't empty).
     expect(wrapper.emitted("update")).toBeTruthy();
+  });
+});
+
+describe("HostCard API key handling", () => {
+  it("shows that a key is set but never pre-fills it when editing", async () => {
+    const wrapper = mount(HostCard, { props: { host: { ...host, has_api_key: true } } });
+    expect(wrapper.text()).toContain("key set");
+
+    await wrapper.findAll("button").find((b) => b.text() === "Edit")!.trigger("click");
+    const keyInput = wrapper.find("input[type='password']");
+    expect((keyInput.element as HTMLInputElement).value).toBe("");
+    expect(keyInput.attributes("placeholder")).toContain("keep the current key");
   });
 });
