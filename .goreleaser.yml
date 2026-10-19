@@ -95,6 +95,9 @@ release:
     and an SPDX SBOM (`*.sbom.json`).
 
     ```sh
+    # Git Bash on Windows rewrites the backslashes in the regex below
+    # unless path conversion is off: export MSYS_NO_PATHCONV=1
+    #
     # 1. the checksums file was produced by this repo's release workflow
     cosign verify-blob checksums.txt \
       --bundle checksums.txt.sigstore.json \
