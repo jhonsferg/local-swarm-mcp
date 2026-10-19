@@ -26,24 +26,22 @@ defineProps<{ backends: Backend[] }>();
   </table>
 </template>
 
-<style scoped lang="scss">
+<style scoped>
+@reference "../styles/main.css";
+
 .backend-table {
   @apply w-full text-sm border-collapse;
-
-  &__th {
-    @apply text-left text-emerald-400 font-semibold border-b border-border pb-1;
-  }
-
-  &__row {
-    @apply border-b border-border;
-  }
-
-  &__td {
-    @apply py-1.5 pr-4;
-
-    &--muted {
-      @apply text-gray-400 italic;
-    }
-  }
+}
+.backend-table__th {
+  @apply text-left text-emerald-400 font-semibold border-b border-border pb-1;
+}
+.backend-table__row {
+  @apply border-b border-border;
+}
+.backend-table__td {
+  @apply py-1.5 pr-4;
+}
+.backend-table__td--muted {
+  @apply text-gray-400 italic;
 }
 </style>

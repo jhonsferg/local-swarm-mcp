@@ -1,0 +1,16 @@
+# golangci-lint v2 configuration (CI pins the binary version in
+# .github/workflows/ci.yml - keep the two in step).
+version: "2"
+
+linters:
+  # "standard" = errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - bodyclose # an unclosed HTTP response body leaks a connection
+    - errorlint # errors.Is/As instead of == / type assertions on wrapped errors
+    - misspell
+    - usestdlibvars
+
+# gofmt is checked separately in CI (a plain `gofmt -l`), not as a
+# golangci formatter: on a Windows checkout with core.autocrlf the
+# formatter flags every CRLF file, though the committed files are LF.

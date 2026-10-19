@@ -46,20 +46,19 @@ function onSubmit() {
   </form>
 </template>
 
-<style scoped lang="scss">
+<style scoped>
+@reference "../styles/main.css";
+
 .register-mcp-form {
   @apply flex flex-col gap-2 bg-panel border border-border rounded-md p-3 mt-2;
-
-  &__field {
-    @apply flex flex-col gap-1;
-  }
-
-  &__label {
-    @apply text-xs text-gray-400;
-  }
-
-  &__actions {
-    @apply flex gap-2 mt-1;
-  }
+}
+.register-mcp-form__field {
+  @apply flex flex-col gap-1;
+}
+.register-mcp-form__label {
+  @apply text-xs text-gray-400;
+}
+.register-mcp-form__actions {
+  @apply flex gap-2 mt-1;
 }
 </style>

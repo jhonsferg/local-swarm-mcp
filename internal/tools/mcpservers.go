@@ -26,7 +26,7 @@ func RegisterDownstreamMCPServerTool() mcp.Tool {
 		mcp.WithDescription("Register a downstream MCP server (e.g. codebase-memory-mcp) that tool-using agents (spawn_agent_task) can invoke - no config file edit or restart needed. Spawned as a local stdio subprocess and connected immediately; check list_available_agent_tools to see what it exposes."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Short name for this server, e.g. \"codebase-memory-mcp\"")),
 		mcp.WithString("command", mcp.Required(), mcp.Description("Executable path to spawn")),
-		mcp.WithArray("args", mcp.Description("Command-line arguments, if any")),
+		mcp.WithArray("args", mcp.WithStringItems(), mcp.Description("Command-line arguments, if any")),
 	)
 }
 
@@ -42,6 +42,9 @@ func (m *MCPServers) RegisterDownstreamMCPServerHandler(ctx context.Context, req
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	args := req.GetStringSlice("args", nil)
+	if err := mcpdownstream.ValidateName(name); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	srv := mcpserverregistry.Server{Name: name, Command: command, Args: args}
 	if err := m.Registry.Register(srv); err != nil {

@@ -14,8 +14,8 @@ type riskPattern struct {
 
 // riskyPatterns is a deliberately simple, fast, rule-based check - not a
 // model call. It flags tasks whose description mentions destructive
-// operations, secrets, or judgment-heavy work, so Claude (or the user) can
-// decide those need Claude's own attention rather than delegation.
+// operations, secrets, or judgment-heavy work, so the MCP client (or the user) can
+// decide those need the client model's own attention rather than delegation.
 var riskyPatterns = []riskPattern{
 	{"force push", "force-push is a destructive, hard-to-reverse git operation"},
 	{"force-push", "force-push is a destructive, hard-to-reverse git operation"},
@@ -35,7 +35,7 @@ var riskyPatterns = []riskPattern{
 // ClassifyTaskRiskTool returns the MCP tool definition for classify_task_risk.
 func ClassifyTaskRiskTool() mcp.Tool {
 	return mcp.NewTool("classify_task_risk",
-		mcp.WithDescription("Fast rule-based check (no model call) on a task description, flagging whether it looks safe to delegate to a local model vs. needing Claude's own judgment. Not authoritative - a clean result doesn't guarantee safety, only that no obvious red flag matched."),
+		mcp.WithDescription("Fast rule-based check (no model call) on a task description, flagging whether it looks safe to delegate to a local model vs. needing your own judgment. Not authoritative - a clean result doesn't guarantee safety, only that no obvious red flag matched."),
 		mcp.WithString("description", mcp.Required(), mcp.Description("Description of the task under consideration")),
 	)
 }

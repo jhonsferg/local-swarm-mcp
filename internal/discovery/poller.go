@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jhonsferg/local-swarm-mcp/internal/backend"
@@ -28,6 +29,11 @@ type Poller struct {
 	Backends *backend.Registry
 	Interval time.Duration
 	client   *http.Client
+
+	// mu serializes applying a poll's outcome to Hosts/Backends with
+	// Unregister, so a poll that was already in flight when its host got
+	// unregistered can't re-add that host's backends afterward.
+	mu sync.Mutex
 }
 
 // NewPoller builds a Poller with a sane HTTP timeout (polling a host that's
@@ -75,10 +81,35 @@ func (p *Poller) PollOnce(ctx context.Context, h hostregistry.Host) {
 	p.pollOne(ctx, h)
 }
 
+// Unregister removes a host from the registry and drops every
+// "<host>/<model>" backend synthesized from it, so its models stop being
+// dispatchable immediately - not just once the process restarts.
+func (p *Poller) Unregister(name string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	previous := lastKnownModels(p.Hosts, name)
+	if err := p.Hosts.UnregisterHost(name); err != nil {
+		return err
+	}
+	for _, m := range previous {
+		p.Backends.Remove(backendName(name, m.Name))
+	}
+	return nil
+}
+
 func (p *Poller) pollOne(ctx context.Context, h hostregistry.Host) {
-	previous := lastKnownModels(p.Hosts, h.Name)
 	models, err := fetchTags(ctx, p.client, h)
-	_ = p.Hosts.RecordPoll(h.Name, models, err)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	previous := lastKnownModels(p.Hosts, h.Name)
+	if recordErr := p.Hosts.RecordPoll(h.Name, models, err); recordErr != nil {
+		// Unregistered while this poll was in flight: its backends were
+		// already dropped by Unregister, so don't re-add any.
+		return
+	}
 
 	if err != nil {
 		// Host unreachable (e.g. powered off): drop its synthesized

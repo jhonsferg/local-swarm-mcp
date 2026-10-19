@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jhonsferg/local-swarm-mcp/internal/authmw"
 	"github.com/jhonsferg/local-swarm-mcp/internal/backend"
 	"github.com/jhonsferg/local-swarm-mcp/internal/config"
 	"github.com/jhonsferg/local-swarm-mcp/internal/hostregistry"
@@ -27,6 +28,13 @@ import (
 type HealthResponse struct {
 	Service string `json:"service"`
 	Version string `json:"version"`
+	// CommandRegistration reports whether this daemon accepts new
+	// downstream MCP server registrations (-allow-command-registration),
+	// so the dashboard can hide that form when it would only be refused.
+	CommandRegistration bool `json:"command_registration"`
+	// AuthRequired reports whether the daemon was started with -api-key, so
+	// the dashboard only offers "Sign out" when there is a session to end.
+	AuthRequired bool `json:"auth_required"`
 }
 
 // RegisterHostRequest is the POST /register-host body.
@@ -62,6 +70,16 @@ type Server struct {
 	// caller can trigger an immediate poll instead of waiting for the next
 	// tick.
 	OnRegistered func(ctx context.Context, host hostregistry.Host)
+	// UnregisterHost, if set, replaces Hosts.UnregisterHost so removing a
+	// host also drops the backends discovered on it (see
+	// discovery.Poller.Unregister).
+	UnregisterHost func(name string) error
+	// AllowCommandRegistration enables POST /admin/register-mcp-server.
+	// Registering a downstream server means spawning an arbitrary local
+	// command, so it is refused unless the operator opted in.
+	AllowCommandRegistration bool
+	// AuthRequired is reported by /admin/health (see HealthResponse).
+	AuthRequired bool
 }
 
 // Handler returns an http.Handler serving the admin endpoints, to be
@@ -77,7 +95,21 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/admin/mcp-servers", s.handleListMCPServers)
 	mux.HandleFunc("/admin/backends", s.handleListBackends)
 	mux.HandleFunc("/admin/logs", s.handleLogs)
-	return mux
+	return requireJSONBody(mux)
+}
+
+// requireJSONBody rejects any POST whose body isn't declared as
+// application/json, so a cross-site <form> or a "simple" text/plain fetch -
+// neither of which triggers a CORS preflight - can't drive these endpoints
+// from a browser.
+func requireJSONBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && !authmw.IsJSON(r) {
+			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +117,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, HealthResponse{Service: "local-swarm-mcp", Version: s.Version})
+	writeJSON(w, http.StatusOK, HealthResponse{Service: "local-swarm-mcp", Version: s.Version, CommandRegistration: s.AllowCommandRegistration, AuthRequired: s.AuthRequired})
 }
 
 func (s *Server) handleRegisterHost(w http.ResponseWriter, r *http.Request) {
@@ -103,15 +135,16 @@ func (s *Server) handleRegisterHost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	host := hostregistry.Host{Name: req.Name, BaseURL: req.BaseURL, APIKey: req.APIKey}
-	if err := s.Hosts.RegisterHost(host); err != nil {
+	host, err := s.Hosts.Upsert(hostregistry.Host{Name: req.Name, BaseURL: req.BaseURL, APIKey: req.APIKey})
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if s.OnRegistered != nil {
 		s.OnRegistered(r.Context(), host)
 	}
-	writeJSON(w, http.StatusOK, host)
+	st, _ := s.Hosts.StatusOf(host.Name)
+	writeJSON(w, http.StatusOK, st.View())
 }
 
 func (s *Server) handleUnregisterHost(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +159,11 @@ func (s *Server) handleUnregisterHost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.Hosts.UnregisterHost(req.Name); err != nil {
+	unregister := s.Hosts.UnregisterHost
+	if s.UnregisterHost != nil {
+		unregister = s.UnregisterHost
+	}
+	if err := unregister(req.Name); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -138,12 +175,16 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.Hosts.Status())
+	writeJSON(w, http.StatusOK, s.Hosts.Views())
 }
 
 func (s *Server) handleRegisterMCPServer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.AllowCommandRegistration {
+		http.Error(w, "registering downstream MCP servers is disabled on this daemon (start it with -allow-command-registration to enable)", http.StatusForbidden)
 		return
 	}
 	var req RegisterMCPServerRequest
@@ -153,6 +194,10 @@ func (s *Server) handleRegisterMCPServer(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Name == "" || req.Command == "" {
 		http.Error(w, "name and command are required", http.StatusBadRequest)
+		return
+	}
+	if err := mcpdownstream.ValidateName(req.Name); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -214,7 +259,7 @@ func (s *Server) handleListBackends(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.Backends.List())
+	writeJSON(w, http.StatusOK, s.Backends.Infos())
 }
 
 // handleLogs streams log lines as Server-Sent Events: recent history

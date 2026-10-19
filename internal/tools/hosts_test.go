@@ -121,3 +121,28 @@ func TestListBackendHostsHandler(t *testing.T) {
 		t.Fatalf("result = %s, want it to mention the registered host", text)
 	}
 }
+
+func TestUnregisterBackendHostHandler_UsesUnregisterHostHook(t *testing.T) {
+	h := newTestHosts(t)
+	var got string
+	h.UnregisterHost = func(name string) error {
+		got = name
+		return h.Registry.UnregisterHost(name)
+	}
+	if err := h.Registry.RegisterHost(hostregistry.Host{Name: "rx9070", BaseURL: "http://192.168.18.29:11434"}); err != nil {
+		t.Fatalf("RegisterHost: %v", err)
+	}
+
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = map[string]any{"name": "rx9070"}
+	result, err := h.UnregisterBackendHostHandler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("UnregisterBackendHostHandler: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %s", toolText(t, result))
+	}
+	if got != "rx9070" {
+		t.Fatalf("UnregisterHost hook called with %q, want rx9070", got)
+	}
+}

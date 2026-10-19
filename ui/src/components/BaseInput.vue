@@ -17,13 +17,14 @@ defineEmits<{ "update:modelValue": [string] }>();
   />
 </template>
 
-<style scoped lang="scss">
+<style scoped>
+@reference "../styles/main.css";
+
 .base-input {
   @apply bg-surface border border-border rounded px-2 py-1 text-sm text-gray-100 w-full;
   @apply focus:outline-none focus:ring-1 focus:ring-emerald-600;
-
-  &--disabled {
-    @apply opacity-50 cursor-not-allowed;
-  }
+}
+.base-input--disabled {
+  @apply opacity-50 cursor-not-allowed;
 }
 </style>

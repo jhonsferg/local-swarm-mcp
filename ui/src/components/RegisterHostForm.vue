@@ -8,10 +8,11 @@ const props = withDefaults(
     initialName?: string;
     initialBaseUrl?: string;
     initialApiKey?: string;
+    apiKeyPlaceholder?: string;
     lockName?: boolean; // true when editing an existing host - name is the key, don't let it change
     submitLabel?: string;
   }>(),
-  { initialName: "", initialBaseUrl: "", initialApiKey: "", lockName: false, submitLabel: "Register" },
+  { initialName: "", initialBaseUrl: "", initialApiKey: "", apiKeyPlaceholder: "", lockName: false, submitLabel: "Register" },
 );
 
 const emit = defineEmits<{
@@ -50,7 +51,7 @@ function onSubmit() {
     </div>
     <div class="register-host-form__field">
       <label class="register-host-form__label">API key (optional)</label>
-      <BaseInput v-model="apiKey" type="password" placeholder="" />
+      <BaseInput v-model="apiKey" type="password" :placeholder="apiKeyPlaceholder" />
     </div>
     <div class="register-host-form__actions">
       <BaseButton type="submit">{{ submitLabel }}</BaseButton>
@@ -59,20 +60,19 @@ function onSubmit() {
   </form>
 </template>
 
-<style scoped lang="scss">
+<style scoped>
+@reference "../styles/main.css";
+
 .register-host-form {
   @apply flex flex-col gap-2 bg-panel border border-border rounded-md p-3 mt-2;
-
-  &__field {
-    @apply flex flex-col gap-1;
-  }
-
-  &__label {
-    @apply text-xs text-gray-400;
-  }
-
-  &__actions {
-    @apply flex gap-2 mt-1;
-  }
+}
+.register-host-form__field {
+  @apply flex flex-col gap-1;
+}
+.register-host-form__label {
+  @apply text-xs text-gray-400;
+}
+.register-host-form__actions {
+  @apply flex gap-2 mt-1;
 }
 </style>

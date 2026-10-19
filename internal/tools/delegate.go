@@ -21,7 +21,7 @@ func DelegateTaskTool() mcp.Tool {
 		mcp.WithString("backend", mcp.Description("Backend name to use; omit to use the first configured backend")),
 		mcp.WithString("system_prompt", mcp.Description("Optional system prompt")),
 		mcp.WithNumber("max_tokens", mcp.DefaultNumber(1024), mcp.Description("Maximum tokens to generate")),
-		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature")),
+		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature; 0 for deterministic output")),
 		mcp.WithNumber("top_p", mcp.Description("Nucleus sampling threshold (0-1); omit to use the backend's own default")),
 	)
 }

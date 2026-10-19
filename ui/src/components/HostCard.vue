@@ -20,6 +20,7 @@ const editing = ref(false);
       <div>
         <span class="host-card__name">{{ host.name }}</span>
         <span class="host-card__url">{{ host.base_url }}</span>
+        <span v-if="host.has_api_key" class="host-card__key">key set</span>
       </div>
       <StatusBadge :online="host.up" />
     </div>
@@ -43,7 +44,7 @@ const editing = ref(false);
       v-if="editing"
       :initial-name="host.name"
       :initial-base-url="host.base_url"
-      :initial-api-key="host.api_key ?? ''"
+      :api-key-placeholder="host.has_api_key ? 'leave blank to keep the current key' : ''"
       lock-name
       submit-label="Save"
       @submit="
@@ -57,44 +58,40 @@ const editing = ref(false);
   </div>
 </template>
 
-<style scoped lang="scss">
+<style scoped>
+@reference "../styles/main.css";
+
 .host-card {
   @apply bg-panel border border-border rounded-md p-3 mb-2;
-
-  &__header {
-    @apply flex items-center justify-between;
-  }
-
-  &__name {
-    @apply font-semibold text-gray-100 mr-2;
-  }
-
-  &__url {
-    @apply text-xs text-gray-400;
-  }
-
-  &__models {
-    @apply mt-2 flex flex-wrap gap-2 text-xs;
-  }
-
-  &__model {
-    @apply bg-surface border border-border rounded px-2 py-0.5 text-gray-300;
-  }
-
-  &__caps {
-    @apply text-gray-500;
-  }
-
-  &__empty {
-    @apply text-gray-500 italic;
-  }
-
-  &__error {
-    @apply mt-2 text-xs text-red-400;
-  }
-
-  &__actions {
-    @apply flex gap-2 mt-2;
-  }
+}
+.host-card__header {
+  @apply flex items-center justify-between;
+}
+.host-card__name {
+  @apply font-semibold text-gray-100 mr-2;
+}
+.host-card__url {
+  @apply text-xs text-gray-400;
+}
+.host-card__key {
+  @apply text-xs text-gray-500 ml-2;
+}
+.host-card__models {
+  @apply mt-2 flex flex-wrap gap-2 text-xs;
+}
+.host-card__model {
+  @apply bg-surface border border-border rounded px-2 py-0.5 text-gray-300;
+}
+.host-card__caps {
+  @apply text-gray-500;
+}
+.host-card__empty {
+  @apply text-gray-500 italic;
+}
+.host-card__error {
+  @apply mt-2 text-xs text-red-400;
+}
+.host-card__actions {
+  @apply flex gap-2 mt-2;
 }
 </style>

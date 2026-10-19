@@ -11,16 +11,16 @@ defineProps<{ title: string }>();
   </section>
 </template>
 
-<style scoped lang="scss">
+<style scoped>
+@reference "../styles/main.css";
+
 .base-card {
   @apply mb-7;
-
-  &__title {
-    @apply text-xs uppercase tracking-wide text-gray-400 border-b border-border pb-1 mb-3;
-  }
-
-  &__body {
-    @apply text-sm;
-  }
+}
+.base-card__title {
+  @apply text-xs uppercase tracking-wide text-gray-400 border-b border-border pb-1 mb-3;
+}
+.base-card__body {
+  @apply text-sm;
 }
 </style>

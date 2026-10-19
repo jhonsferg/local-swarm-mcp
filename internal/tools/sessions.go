@@ -35,11 +35,11 @@ func (s *Sessions) CreateSessionHandler(_ context.Context, req mcp.CallToolReque
 // SendMessageTool returns the MCP tool definition for send_message.
 func SendMessageTool() mcp.Tool {
 	return mcp.NewTool("send_message",
-		mcp.WithDescription("Send a message to an open session, carrying its full prior history, and return the reply."),
+		mcp.WithDescription("Send a message to an open session, carrying its prior history, and return the reply. Only the most recent 40 history messages are kept and resent (the system prompt always is), so very long sessions gradually forget their earliest turns."),
 		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session ID returned by create_session")),
 		mcp.WithString("message", mcp.Required(), mcp.Description("Message to send")),
 		mcp.WithNumber("max_tokens", mcp.DefaultNumber(1024), mcp.Description("Maximum tokens to generate")),
-		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature")),
+		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature; 0 for deterministic output")),
 		mcp.WithNumber("top_p", mcp.Description("Nucleus sampling threshold (0-1); omit to use the backend's own default")),
 	)
 }

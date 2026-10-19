@@ -1,0 +1,78 @@
+version: 2
+
+# Minor and patch updates are grouped into one PR per ecosystem per week;
+# each major update gets its own PR, since those can break the build and
+# need a careful look. Reviewers come from .github/CODEOWNERS.
+#
+# cooldown: wait a few days after a version is published before proposing
+# it, so a compromised release that gets yanked quickly never reaches a PR.
+# Security updates (Dependabot alerts) are not delayed by it.
+#
+# Commit prefixes follow the repository's commit types: "fix" for
+# dependencies compiled into the released binary (so auto-release cuts a
+# patch release), "chore" for tooling.
+
+updates:
+  # Go modules (server)
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: sunday
+      time: "02:00"
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: fix
+      include: scope
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  # npm (ui/ - the dashboard embedded into the binary)
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+      day: sunday
+      time: "02:30"
+    cooldown:
+      default-days: 3
+      semver-major-days: 7
+    labels:
+      - dependencies
+      - ui
+    commit-message:
+      prefix: fix
+      prefix-development: chore
+      include: scope
+    groups:
+      ui-minor-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  # GitHub Actions (pinned by commit SHA; Dependabot bumps the SHA and the
+  # version comment together)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      day: sunday
+      time: "03:00"
+    cooldown:
+      default-days: 7
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      github-actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 2

@@ -14,6 +14,7 @@ package hostregistry
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -177,13 +178,22 @@ func (r *Registry) Hosts() ([]Host, error) {
 	return hosts, err
 }
 
+// ErrUnknownHost is returned by RecordPoll for a host that isn't (or is no
+// longer) registered.
+var ErrUnknownHost = errors.New("host is not registered")
+
 // RecordPoll updates the live in-memory status with the outcome of a real
 // poll. Nothing here touches disk - models is never persisted, so a model
 // removed on the host itself stops showing up as of the very next poll.
+// A poll that finishes after its host was unregistered is discarded with
+// ErrUnknownHost, rather than resurrecting a status entry for it.
 func (r *Registry) RecordPoll(hostName string, models []Model, pollErr error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	st := r.status[hostName]
+	st, ok := r.status[hostName]
+	if !ok {
+		return fmt.Errorf("record poll for %q: %w", hostName, ErrUnknownHost)
+	}
 	st.LastSeen = time.Now()
 	if pollErr != nil {
 		st.Up = false
@@ -214,4 +224,54 @@ func (r *Registry) StatusOf(name string) (HostStatus, bool) {
 	defer r.mu.RUnlock()
 	st, ok := r.status[name]
 	return st, ok
+}
+
+// Upsert registers h like RegisterHost, except that an empty h.APIKey keeps
+// the key already stored for an existing host of that name instead of
+// clearing it - so a client that never sees keys (see View) can still edit
+// a host's base URL without re-entering its key. Returns the host as
+// stored.
+func (r *Registry) Upsert(h Host) (Host, error) {
+	if h.APIKey == "" {
+		if existing, ok := r.StatusOf(h.Name); ok {
+			h.APIKey = existing.APIKey
+		}
+	}
+	return h, r.RegisterHost(h)
+}
+
+// HostView is a HostStatus as shown to clients (MCP tools, the admin API,
+// the dashboard): everything except the API key itself, which is only
+// ever reported as present or not.
+type HostView struct {
+	Name      string    `json:"name"`
+	BaseURL   string    `json:"base_url"`
+	HasAPIKey bool      `json:"has_api_key"`
+	Models    []Model   `json:"models"`
+	Up        bool      `json:"up"`
+	LastSeen  time.Time `json:"last_seen"`
+	LastErr   string    `json:"last_error,omitempty"`
+}
+
+// View returns st without its API key.
+func (st HostStatus) View() HostView {
+	return HostView{
+		Name:      st.Name,
+		BaseURL:   st.BaseURL,
+		HasAPIKey: st.APIKey != "",
+		Models:    st.Models,
+		Up:        st.Up,
+		LastSeen:  st.LastSeen,
+		LastErr:   st.LastErr,
+	}
+}
+
+// Views returns the redacted live view of every registered host.
+func (r *Registry) Views() []HostView {
+	statuses := r.Status()
+	out := make([]HostView, 0, len(statuses))
+	for _, st := range statuses {
+		out = append(out, st.View())
+	}
+	return out
 }

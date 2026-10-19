@@ -3,7 +3,7 @@
 <p align="center">
   <a href="https://github.com/jhonsferg/local-swarm-mcp/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jhonsferg/local-swarm-mcp/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/jhonsferg/local-swarm-mcp/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-  <img alt="Go" src="https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white">
+  <img alt="Go" src="https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go&logoColor=white">
   <img alt="MCP" src="https://img.shields.io/badge/MCP-compatible-6f42c1">
   <img alt="Status" src="https://img.shields.io/badge/status-v0.5-orange">
 </p>
@@ -134,6 +134,30 @@ Nothing in the server enforces this - it's a client-side policy this
 project is designed to support. See a specific client's own configuration
 (rules file, memory, system prompt, etc.) for how it's told to apply it.
 
+### 🧩 Agent skill (Claude Code, Codex, Cursor, Copilot, opencode, Gemini CLI)
+
+[`skills/local-swarm/`](skills/local-swarm/) packages this policy as an
+[Agent Skill](https://agentskills.io) - the `SKILL.md` format these
+coding agents share: when to delegate, which tool fits which job, how to
+prompt a small model, how to verify its output, and what never to send
+it. Each agent looks in its own directories, but two locations cover all
+of them:
+
+| Location | Read by |
+|---|---|
+| `~/.agents/skills/` (all your projects) or `.agents/skills/` (one project) | Codex, Cursor, GitHub Copilot (agent mode, CLI, cloud agent), opencode, Gemini CLI |
+| `~/.claude/skills/` or `.claude/skills/` | Claude Code (also read by Cursor, Copilot, and opencode) |
+
+```sh
+# every project, every agent
+mkdir -p ~/.agents/skills ~/.claude/skills
+cp -r skills/local-swarm ~/.agents/skills/
+cp -r skills/local-swarm ~/.claude/skills/
+```
+
+The skill assumes the MCP server is registered under the name
+`local-swarm-mcp`, as in the examples below.
+
 ## ⚙️ Prerequisites
 
 **1. An OpenAI-compatible inference backend, running somewhere reachable.**
@@ -190,6 +214,12 @@ Its OpenAI-compatible endpoint is `http://<host>:8080/v1`.
 `/v1/chat/completions` endpoint, also work - just point a backend entry
 at it.
 
+> **Automatic discovery is Ollama-only.** `register_backend_host` /
+> `-register-host` poll Ollama's native `/api/tags` to find models.
+> llama.cpp, vLLM, and hosted providers work as *static* backends -
+> `-backend-url`/`-backend-model`, or a `backends:` entry in a config
+> file - not as discovered hosts.
+
 **2. local-swarm-mcp itself** - either grab a release binary or build from
 source. See [Installing](#-installing) below.
 
@@ -215,18 +245,38 @@ and its `checksums.txt`, verify the SHA-256 checksum, and install
 override the install location or pin a specific version instead of
 `latest`.
 
-Releases are built by [goreleaser](https://goreleaser.com) for
+Releases are built on GitHub's runners by [goreleaser](https://goreleaser.com) for
 `{linux,darwin,windows} x {amd64,arm64}` and published automatically on
 every merge to `main` whose commits since the last tag warrant a version
 bump (Conventional Commits: `feat:` -> minor, `fix:`/`perf:`/`refactor:`
 -> patch, `feat!:`/`BREAKING CHANGE` -> major). See [releases](https://github.com/jhonsferg/local-swarm-mcp/releases).
+
+Each release also carries a keyless [Sigstore](https://www.sigstore.dev/)
+signature over `checksums.txt`, an SPDX SBOM per archive, and a GitHub
+build-provenance attestation per artifact; the release notes show how to
+verify them (`cosign verify-blob …` or `gh attestation verify …`). Every
+pull request builds the same archives as a snapshot, downloadable from
+its CI run.
+
+### 🔐 Security automation
+
+| Workflow | What it does |
+|---|---|
+| `ci.yml` | Build, vet, race tests on Linux/macOS/Windows; golangci-lint; `govulncheck`; `npm audit`; snapshot release build |
+| `codeql.yml` | CodeQL (`security-extended`) for Go, TypeScript, and the workflows themselves; weekly too |
+| `trivy.yml` | Dependency CVEs (Go + npm), misconfigurations, and secrets; daily; fails on fixable HIGH/CRITICAL |
+| `secrets-scan.yml` | TruffleHog over the git history |
+| `dependency-review.yml` | On PRs: blocks new HIGH/CRITICAL advisories and non-allowlisted licenses |
+| `.github/dependabot.yml` | Weekly Go and npm updates, monthly Actions updates, with a release-age cooldown |
+
+All third-party actions are pinned to full commit SHAs.
 
 ### From source
 
 ```sh
 go build -o local-swarm-mcp ./cmd/local-swarm-mcp
 ```
-Requires Go 1.26 or newer.
+Requires Go 1.27 or newer.
 
 ## 🚀 Running the server
 
@@ -243,9 +293,18 @@ local-swarm-mcp
 # Run it as a persistent daemon instead (a standalone process you start
 # yourself, with a web dashboard) - useful when your inference hardware
 # lives on a different machine than your MCP client, or you just want the
-# dashboard:
+# dashboard. It listens on 127.0.0.1:8090 only; -insecure-no-auth is
+# refused on any non-loopback address:
 local-swarm-mcp -transport http -insecure-no-auth -ui
 ```
+
+Several processes can share the same stores safely: a second stdio
+session, or a stdio session started while a daemon runs, starts normally.
+Only one process can hold the scratch store file at a time, so in the
+others `scratch_*` calls return a clear "held by another local-swarm-mcp
+process" error - retried on every call, so they start working as soon as
+the holder exits - instead of the whole server hanging at startup. Pass
+`-store-path` to give a session its own scratch file.
 
 Either way, backends aren't required at startup - see
 [Configuring backends](#-configuring-backends) next for how to add one.
@@ -288,12 +347,16 @@ local-swarm-mcp -backend-name local-llama -backend-url http://localhost:8080/v1 
 |---|---|---|
 | `-transport` | `stdio` | `"stdio"` (spawned as a local subprocess) or `"http"` (the persistent daemon) |
 | `-ui` | `false` | Serve the embedded dashboard at `/` - only meaningful for `-transport=http` |
-| `-http-addr` | `:8090` | Listen address when `-transport=http`, e.g. `:8090` or `0.0.0.0:8090` |
+| `-http-addr` | `127.0.0.1:8090` | Listen address when `-transport=http`; a non-loopback address such as `0.0.0.0:8090` requires `-api-key` |
 | `-api-key` | *(none)* | Bearer token HTTP clients must present when `-transport=http`; required unless `-insecure-no-auth` is set |
-| `-insecure-no-auth` | `false` | Allow `-transport=http` with no `-api-key` - only on a trusted, isolated network |
+| `-insecure-no-auth` | `false` | Allow `-transport=http` with no `-api-key` - refused unless `-http-addr` is loopback |
+| `-allow-command-registration` | `false` | Allow registering downstream MCP servers at runtime (MCP tool, admin API, dashboard) - each registration spawns an arbitrary local command |
 | `-register-host` | `false` | Register an inference host for background discovery - see `-name`/`-host-base-url`/`-host-api-key` |
 | `-backend-name`/`-backend-url`/`-backend-model`/`-backend-key` | *(none)* | A single ad-hoc backend, for a quick run without the daemon |
+| `-backend-timeout` | `2m0s` | Maximum time for a single completion request |
+| `-max-concurrent-per-backend` | `4` | Maximum in-flight completions per backend host (`0` = unlimited); extra requests wait their turn |
 | `-store-path` | `<user cache dir>/local-swarm-mcp/scratch.db` | Override the scratch-store file location |
+| `-lock-path` | `<user cache dir>/local-swarm-mcp/daemon.lock` | Override the daemon lock file (e.g. to run two isolated daemons) |
 
 Run `local-swarm-mcp -h` for the full, grouped flag reference (host
 discovery, downstream MCP servers, storage locations, and more).
@@ -334,10 +397,19 @@ discovery - is almost certainly why: either delete it, or empty out its
 
 ## 🔌 Registering with an MCP client
 
+local-swarm-mcp is a standard MCP server (stdio, or Streamable HTTP at
+`/mcp`) and works with any MCP client. CI checks it negotiates every MCP
+protocol version from `2024-11-05` to `2025-11-25` and that all its tool
+schemas pass the strictest client rules (OpenAI-style function names,
+arrays with `items`, 64-character names after client prefixes) - see
+`cmd/local-swarm-mcp/compat_test.go`.
+
 ### 💻 Local (stdio) - the common case
 
-Add an entry to your client's MCP config (e.g. Claude Code's `.mcp.json`)
-pointing `command` at the built binary:
+Point your client at the built binary. Most clients use this shape
+(Claude Code's `.mcp.json`, Cursor's `~/.cursor/mcp.json` or
+`.cursor/mcp.json`, Claude Desktop, Windsurf, Gemini CLI's
+`settings.json`):
 
 ```json
 {
@@ -348,6 +420,20 @@ pointing `command` at the built binary:
   }
 }
 ```
+
+The others:
+
+| Client | Where | Entry |
+|---|---|---|
+| Claude Code (CLI) | - | `claude mcp add local-swarm-mcp -- /path/to/local-swarm-mcp` |
+| Codex | `~/.codex/config.toml` (or `codex mcp add local-swarm-mcp -- /path/to/local-swarm-mcp`) | `[mcp_servers.local-swarm-mcp]`<br>`command = "/path/to/local-swarm-mcp"` |
+| VS Code / GitHub Copilot (agent mode) | `.vscode/mcp.json` | `{"servers": {"local-swarm-mcp": {"type": "stdio", "command": "/path/to/local-swarm-mcp"}}}` |
+| opencode | `opencode.json` | `{"mcp": {"local-swarm-mcp": {"type": "local", "command": ["/path/to/local-swarm-mcp"]}}}` |
+
+Flags go in `args` (`"args": ["-backend-url", "http://localhost:11434/v1", "-backend-model", "qwen2.5-coder:7b"]`)
+- for opencode, append them to its `command` array; for Codex, add
+`args = [...]`. These files hold per-machine paths (and, for HTTP,
+tokens): keep them out of version control.
 
 Keep this path **unversioned** (`local-swarm-mcp`, not
 `local-swarm-mcp-v2`): rebuilding to the same fixed path means your
@@ -379,26 +465,34 @@ the dashboard):
 local-swarm-mcp -transport http -http-addr 0.0.0.0:8090 -api-key <a-strong-random-token> -ui
 ```
 
-Then point your MCP client at it over HTTP (exact config syntax depends on
-your client - check whether it supports a `url` + `headers` style MCP
-entry, e.g.):
+Then point your MCP client at `http://gpu-host:8090/mcp` with an
+`Authorization: Bearer <token>` header. Prefer reading the token from an
+environment variable over pasting it into a config file:
 
-```json
-{
-  "mcpServers": {
-    "local-swarm-mcp": {
-      "url": "http://gpu-host:8090/mcp",
-      "headers": { "Authorization": "Bearer <a-strong-random-token>" }
-    }
-  }
-}
-```
+| Client | Entry |
+|---|---|
+| Claude Code | `claude mcp add --transport http local-swarm-mcp http://gpu-host:8090/mcp --header "Authorization: Bearer $LOCAL_SWARM_API_KEY"` |
+| Cursor (`mcp.json`) | `{"mcpServers": {"local-swarm-mcp": {"url": "http://gpu-host:8090/mcp", "headers": {"Authorization": "Bearer ${env:LOCAL_SWARM_API_KEY}"}}}}` |
+| Codex (`config.toml`) | `[mcp_servers.local-swarm-mcp]`<br>`url = "http://gpu-host:8090/mcp"`<br>`bearer_token_env_var = "LOCAL_SWARM_API_KEY"` |
+| VS Code / Copilot (`.vscode/mcp.json`) | `{"servers": {"local-swarm-mcp": {"type": "http", "url": "http://gpu-host:8090/mcp", "headers": {"Authorization": "Bearer ${env:LOCAL_SWARM_API_KEY}"}}}}` |
+| opencode (`opencode.json`) | `{"mcp": {"local-swarm-mcp": {"type": "remote", "url": "http://gpu-host:8090/mcp", "headers": {"Authorization": "Bearer {env:LOCAL_SWARM_API_KEY}"}}}}` |
+| Gemini CLI (`settings.json`) | `{"mcpServers": {"local-swarm-mcp": {"httpUrl": "http://gpu-host:8090/mcp", "headers": {"Authorization": "Bearer $LOCAL_SWARM_API_KEY"}}}}` |
 
-🔒 `-api-key` is required unless you pass `-insecure-no-auth` - anyone who
-can reach the port can otherwise spawn tasks and read/write the scratch
-store, so treat it like any other network-exposed service.
-`-insecure-no-auth` is only reasonable on a network you fully trust and
-isolate (e.g. a home LAN with no other untrusted devices).
+A request without the token gets `401` with a `WWW-Authenticate: Bearer`
+challenge. Clients that then offer an OAuth sign-in are probing for an
+authorization server this daemon doesn't have - configure the header
+instead.
+
+🔒 Listening beyond loopback requires `-api-key` - anyone who can reach
+the port could otherwise spawn tasks and read/write the scratch store, so
+treat it like any other network-exposed service. `-insecure-no-auth` is
+only accepted on a loopback `-http-addr`. The daemon also refuses
+requests a web page could forge through your browser: `POST`s that
+aren't `application/json`, requests whose `Origin` doesn't match the
+daemon, and (on loopback) requests naming a foreign `Host`, which is how
+DNS-rebinding attacks reach local servers. API keys - the daemon's own
+and any host's - are never returned by any endpoint or tool; responses
+only say `"has_api_key": true`.
 
 ### 🛰️ Host discovery - add inference hardware without editing config or restarting
 
@@ -435,12 +529,17 @@ opportunistic rather than exclusive: unlike `-transport http`, a stdio
 session doesn't go through leader election first, so if a `-transport
 http` daemon is *already* holding that store file when the stdio session
 starts, the stdio session just quietly does without those particular
-tools for that run (every other tool still works normally) instead of
-erroring out or hanging. If you need both at once reliably - a dashboard
-*and* an MCP client registering hosts live - start the daemon first, then
-your MCP client; the reverse order also works as long as the stdio
-session isn't actively holding the lock at the exact moment the daemon
-starts (it retries for up to 5s before giving up with a clear error).
+tools for that run (every other tool still works normally, and the
+scratch store degrades as described in [Running the server](#-running-the-server))
+instead of erroring out or hanging. If you need both at once - a
+dashboard *and* an MCP client registering hosts live - start the daemon
+first, then your MCP client, and manage hosts from the dashboard or
+`-register-host`; the reverse order also works as long as the stdio
+session isn't holding the host store at the moment the daemon starts
+(the daemon retries for up to 5s before giving up with a clear error).
+
+`-register-host` must present the same `-api-key` as the running daemon;
+without it, it stops with an error saying so.
 
 The same operations are also available as MCP tools
 (`register_backend_host`, `unregister_backend_host`,
@@ -463,6 +562,15 @@ The same three operations are also exposed over the admin HTTP surface
 (`POST /admin/register-mcp-server`, `POST /admin/unregister-mcp-server`,
 `GET /admin/mcp-servers`) and from the embedded dashboard below.
 
+🔒 **Registering is off unless you start with `-allow-command-registration`.**
+A registration is "run this command", so without the flag the MCP tool
+isn't offered at all and the admin endpoint answers 403 - a misled or
+prompt-injected client can't turn it into arbitrary command execution.
+Listing and unregistering always work, and servers from a config file or
+registered earlier still connect. A server whose process dies is respawned
+on its next tool call; names may not contain `__` (it separates server and
+tool in `<server>__<tool>`).
+
 ## 📊 Dashboard
 
 ```
@@ -475,16 +583,32 @@ with live up/down status and discovered models, registered downstream
 MCP servers with live connected/disconnected status, and a live-streaming
 log tail. Everything on the page is a thin client over the same
 `/admin/*` endpoints described above - you can register or edit a host,
-register a downstream MCP server, or watch what the daemon is doing in
-real time, all without touching a config file or a terminal.
+register a downstream MCP server (with `-allow-command-registration`), or
+watch what the daemon is doing in real time, all without touching a
+config file or a terminal. Failed actions are shown in a banner at the
+top of the page.
+
+With `-api-key`, the page asks for the key once and the daemon keeps an
+`HttpOnly`, `SameSite=Strict` session cookie (derived from the key, never
+the key itself) for every later request, including the live log stream.
+The page's static files are public; all data stays behind the key.
+Host API keys are never sent to the page: when editing a host, leave the
+key field blank to keep its current key.
 
 ## 🧰 Tools
 
 ### 🔗 Backends
 | Tool | Purpose |
 |---|---|
-| `list_backends` | List configured backends (name, base_url, model) |
+| `list_backends` | List configured backends (name, base_url, model, whether a key is set) - the first one listed is the default |
 | `health_check` | Probe reachability of one backend, or all if omitted |
+
+Every tool with a `backend` parameter falls back to a default when it's
+omitted: the first statically configured backend (`-backend-url` or a
+config file), or - with none - the first discovered `<host>/<model>`
+backend in name order. Completions are capped at
+`-max-concurrent-per-backend` in flight per backend host and
+`-backend-timeout` each.
 
 ### 🛰️ Host discovery
 | Tool | Purpose |
@@ -503,7 +627,7 @@ below for the one edge case (two sessions racing for the same store file).
 ### 🔌 Downstream MCP servers
 | Tool | Purpose |
 |---|---|
-| `register_downstream_mcp_server` | Register and connect a downstream MCP server (e.g. codebase-memory-mcp) at runtime |
+| `register_downstream_mcp_server` | Register and connect a downstream MCP server (e.g. codebase-memory-mcp) at runtime - only offered with `-allow-command-registration` |
 | `unregister_downstream_mcp_server` | Disconnect and remove a registered downstream MCP server |
 | `list_downstream_mcp_servers` | List registered downstream servers and whether each is currently connected |
 
@@ -515,6 +639,8 @@ below for the one edge case (two sessions racing for the same store file).
 
 `delegate_task`, `spawn_task`, `send_message`, and `spawn_agent_task` all take
 the same three sampling parameters: `max_tokens`, `temperature`, `top_p`.
+`temperature` is always sent, so `0` really means deterministic decoding;
+`top_p` is omitted unless set.
 Deliberately only these three - they're the ones the OpenAI
 chat-completions spec actually defines, so they're honored consistently
 whether the backend is llama.cpp, Ollama, vLLM, or a hosted provider.
@@ -534,13 +660,16 @@ local-swarm-mcp.
 | `spawn_task` | Start a task in the background, return a task ID immediately |
 | `task_status` | Non-blocking snapshot of a task's state (pending/running/completed/failed/cancelled) |
 | `wait_task` | Block until a task finishes or a timeout elapses, then return its final snapshot |
-| `list_tasks` | List every task spawned this server run |
+| `list_tasks` | List tasks spawned this server run |
 | `cancel_task` | Cancel a still-running task |
+
+Tasks live in memory only. Running tasks are never dropped; finished ones
+stay queryable for an hour, at most the 500 most recent.
 
 ### 🧑‍🔧 Tool-using agents (autonomous, like a host application's own agents)
 | Tool | Purpose |
 |---|---|
-| `spawn_agent_task` | Start a background agent that can call tools from configured downstream MCP servers (`mcp_servers` in config) in a loop before answering, tracked via the same `task_status`/`wait_task`/`list_tasks`/`cancel_task` tools above. The result includes a full transcript of every tool call made, for auditing. |
+| `spawn_agent_task` | Start a background agent that can call tools from configured downstream MCP servers in a loop before answering, tracked via the same `task_status`/`wait_task`/`list_tasks`/`cancel_task` tools above. Its `mcp_servers` filter is enforced: a call to any tool the agent wasn't offered is refused and recorded as an error. Each tool result fed back to the model is capped at 16 KiB. The result includes a full transcript of every tool call made, for auditing. |
 | `list_available_agent_tools` | List every tool discovered from configured downstream MCP servers (namespaced `<server>__<tool>`) that an agent could invoke |
 
 ⚠️ **Requires a tool-calling-capable model.** Not every model that claims
@@ -585,6 +714,9 @@ be far less reliable than the client that configured it.
 | `close_session` | Discard a session |
 | `list_sessions` | List every open session with its backend and message count |
 
+A session keeps (and resends) only its most recent 40 history messages,
+dropped a user/assistant pair at a time; its system prompt always stays.
+
 ### 🗄️ Scratch store (persistent key-value space outside the client's context)
 | Tool | Purpose |
 |---|---|
@@ -605,10 +737,16 @@ be far less reliable than the client that configured it.
 go build ./...
 go vet ./...
 go test ./... -race -covermode=atomic
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
 ```
 
 `-race` requires cgo (`CGO_ENABLED=1`); on a machine without a C toolchain,
 drop `-race` for local runs - CI still runs it on all three OSes.
+
+`go test ./...` includes end-to-end tests (`cmd/local-swarm-mcp/integration_test.go`)
+that build the real binary and drive it over stdio and HTTP against fake
+backends, with every store, lock, and log path in a temp dir - they never
+touch your real local-swarm-mcp state.
 
 ### Building the dashboard (`ui/`)
 
@@ -619,22 +757,21 @@ server) instead of one slow, tangled one.
 
 ```
 cd ui
-npm install
+npm ci
 npm run test     # vitest, component-level
 npm run build    # type-checks (vue-tsc) then builds straight into
-                  # ../internal/webui/dist, which cmd/local-swarm-mcp
+                  # ../internal/webui/dist/app, which cmd/local-swarm-mcp
                   # embeds via go:embed
 ```
 
-A minimal placeholder is committed at `internal/webui/dist` so a bare
-`go build ./...` never breaks on a fresh clone without Node installed -
-CI and goreleaser always run the real `npm run build` first (see the
-`ui` job in `.github/workflows/ci.yml` and the `before.hooks` in
-`.goreleaser.yml`), so release and CI-tested binaries always ship the
-actual dashboard, never that placeholder. If you edit anything under
-`ui/src`, run `npm run build` and commit the resulting change under
-`internal/webui/dist` too, so the placeholder stays reasonably fresh for
-everyone else's bare `go build`.
+The build output is **never committed** (`internal/webui/dist/app/` is
+git-ignored; only `internal/webui/dist/.gitkeep` is tracked so
+`go:embed` compiles). A bare `go build ./...` on a fresh clone without
+Node still works - its `-ui` page just explains how to build the real
+dashboard, and `local-swarm-mcp -version` reports `dashboard not built`.
+Run `npm run build` before `go build` to embed it. CI and the release
+workflow always do, and fail if a published binary doesn't report
+`dashboard embedded`.
 
 For local frontend development against a running daemon, `npm run dev`
 starts Vite's dev server with `/admin` proxied to `http://localhost:8090`

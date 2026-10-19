@@ -18,13 +18,13 @@ type Backends struct {
 // ListBackendsTool returns the MCP tool definition for list_backends.
 func ListBackendsTool() mcp.Tool {
 	return mcp.NewTool("list_backends",
-		mcp.WithDescription("List configured OpenAI-compatible inference backends (name, base_url, model)."),
+		mcp.WithDescription("List configured OpenAI-compatible inference backends (name, base_url, model, whether an API key is set). The first one listed is the default used when a tool call omits \"backend\"."),
 	)
 }
 
 // ListBackendsHandler returns the configured backends as JSON.
 func (b *Backends) ListBackendsHandler(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return jsonResult(b.Registry.List())
+	return jsonResult(b.Registry.Infos())
 }
 
 // HealthCheckTool returns the MCP tool definition for health_check.
