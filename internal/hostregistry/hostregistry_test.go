@@ -1,8 +1,10 @@
 package hostregistry
 
 import (
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,5 +208,55 @@ func TestOpenWithOptions_TimesOutWhenAlreadyLocked(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("OpenWithOptions took %s to fail - timeout was not respected", elapsed)
+	}
+}
+
+func TestRecordPoll_UnknownHostIsDiscarded(t *testing.T) {
+	r := openTestRegistry(t)
+
+	err := r.RecordPoll("gone", []Model{{Name: "gemma4:12b"}}, nil)
+	if !errors.Is(err, ErrUnknownHost) {
+		t.Fatalf("RecordPoll(unregistered) = %v, want ErrUnknownHost", err)
+	}
+	if _, ok := r.StatusOf("gone"); ok {
+		t.Fatal("RecordPoll must not create a status entry for an unregistered host")
+	}
+}
+
+func TestUpsert_EmptyKeyKeepsExistingKey(t *testing.T) {
+	r := openTestRegistry(t)
+	if err := r.RegisterHost(Host{Name: "rx9070", BaseURL: "http://a:11434", APIKey: "k1"}); err != nil {
+		t.Fatalf("RegisterHost: %v", err)
+	}
+
+	stored, err := r.Upsert(Host{Name: "rx9070", BaseURL: "http://b:11434"})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if stored.APIKey != "k1" || stored.BaseURL != "http://b:11434" {
+		t.Fatalf("Upsert returned %+v, want new base URL with the existing key", stored)
+	}
+	hosts, err := r.Hosts()
+	if err != nil || len(hosts) != 1 || hosts[0] != stored {
+		t.Fatalf("Hosts() = %+v, %v; want [%+v]", hosts, err, stored)
+	}
+
+	if stored, err = r.Upsert(Host{Name: "rx9070", BaseURL: "http://b:11434", APIKey: "k2"}); err != nil || stored.APIKey != "k2" {
+		t.Fatalf("Upsert with a new key = %+v, %v; want key k2", stored, err)
+	}
+}
+
+func TestView_RedactsAPIKey(t *testing.T) {
+	r := openTestRegistry(t)
+	if err := r.RegisterHost(Host{Name: "rx9070", BaseURL: "http://a:11434", APIKey: "super-secret"}); err != nil {
+		t.Fatalf("RegisterHost: %v", err)
+	}
+	views := r.Views()
+	if len(views) != 1 || !views[0].HasAPIKey {
+		t.Fatalf("Views() = %+v, want one host with HasAPIKey", views)
+	}
+	data, _ := json.Marshal(views)
+	if strings.Contains(string(data), "super-secret") || strings.Contains(string(data), `"api_key"`) {
+		t.Fatalf("Views() JSON leaks the key: %s", data)
 	}
 }
