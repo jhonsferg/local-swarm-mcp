@@ -23,7 +23,7 @@ func SpawnTaskTool() mcp.Tool {
 		mcp.WithString("backend", mcp.Description("Backend name to use; omit to use the first configured backend")),
 		mcp.WithString("system_prompt", mcp.Description("Optional system prompt")),
 		mcp.WithNumber("max_tokens", mcp.DefaultNumber(1024), mcp.Description("Maximum tokens to generate")),
-		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature")),
+		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature; 0 for deterministic output")),
 		mcp.WithNumber("top_p", mcp.Description("Nucleus sampling threshold (0-1); omit to use the backend's own default")),
 	)
 }
@@ -100,7 +100,7 @@ func (t *Tasks) WaitTaskHandler(ctx context.Context, req mcp.CallToolRequest) (*
 // ListTasksTool returns the MCP tool definition for list_tasks.
 func ListTasksTool() mcp.Tool {
 	return mcp.NewTool("list_tasks",
-		mcp.WithDescription("List every task spawned this server run, with their current status."),
+		mcp.WithDescription("List tasks spawned this server run, with their current status. Running tasks are always listed; finished ones are kept for an hour (at most the 500 most recent) before being dropped, so fetch results you need with task_status or wait_task."),
 	)
 }
 
