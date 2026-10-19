@@ -97,7 +97,9 @@ jobs:
           version: v2.15.0 # keep in step with .golangci.yml
 
   govulncheck:
-    name: Go vulnerability check
+    # Name is a required status check on main - keep it in sync with the
+    # branch protection settings.
+    name: Dependency CVE Audit
     needs: [ui]
     runs-on: ubuntu-latest
     steps:
