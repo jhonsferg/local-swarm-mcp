@@ -1,0 +1,21 @@
+# local-swarm-mcp - code owners. GitHub requests their review on every
+# pull request touching the matching paths (including Dependabot's).
+
+# Default: everything
+*                       @jhonsferg
+
+# Security-sensitive surface: auth, the admin API, and anything that
+# spawns processes or talks to the network
+internal/authmw/        @jhonsferg
+internal/admin/         @jhonsferg
+internal/mcpdownstream/ @jhonsferg
+
+# CI/CD, release, and supply chain
+.github/                @jhonsferg
+.goreleaser.yml         @jhonsferg
+.golangci.yml           @jhonsferg
+go.mod                  @jhonsferg
+go.sum                  @jhonsferg
+ui/package.json         @jhonsferg
+ui/package-lock.json    @jhonsferg
+install/                @jhonsferg
