@@ -363,6 +363,24 @@ func TestHandler_RejectsNonJSONPost(t *testing.T) {
 	}
 }
 
+func TestHandleRegisterMCPServer_DisabledByDefault(t *testing.T) {
+	mcpServers := openTestMCPServers(t)
+	s := &Server{Version: "dev", Hosts: openTestHosts(t), MCPServers: mcpServers, Downstream: newTestDownstream(t)}
+
+	body, _ := json.Marshal(RegisterMCPServerRequest{Name: "x", Command: "calc.exe"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/register-mcp-server", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 without AllowCommandRegistration", rec.Code)
+	}
+	if servers, _ := mcpServers.List(); len(servers) != 0 {
+		t.Fatalf("a refused registration must not be persisted, got %+v", servers)
+	}
+}
+
 func TestHandleHealth_ReportsCommandRegistration(t *testing.T) {
 	s := &Server{Version: "dev", Hosts: openTestHosts(t), AllowCommandRegistration: true}
 	rec := httptest.NewRecorder()
