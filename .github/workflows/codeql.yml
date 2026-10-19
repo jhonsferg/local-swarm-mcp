@@ -57,3 +57,18 @@ jobs:
         uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           category: /language:${{ matrix.language }}
+
+  # Single result for the whole matrix: "CodeQL" is a required status check
+  # on main, and a matrix job can't carry one fixed name.
+  codeql:
+    name: CodeQL
+    needs: [analyze]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every language to pass
+        env:
+          RESULT: ${{ needs.analyze.result }}
+        run: |
+          echo "analyze: $RESULT"
+          test "$RESULT" = "success"
