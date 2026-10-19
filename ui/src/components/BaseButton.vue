@@ -23,24 +23,22 @@ defineEmits<{ click: [MouseEvent] }>();
   </button>
 </template>
 
-<style scoped lang="scss">
+<style scoped>
+@reference "../styles/main.css";
+
 .base-btn {
   @apply rounded-md px-3 py-1.5 text-sm font-medium transition-colors;
-
-  &--primary {
-    @apply bg-emerald-600 text-white hover:bg-emerald-500;
-  }
-
-  &--danger {
-    @apply bg-red-700 text-white hover:bg-red-600;
-  }
-
-  &--ghost {
-    @apply bg-transparent text-gray-300 border border-border hover:bg-panel;
-  }
-
-  &--disabled {
-    @apply opacity-50 cursor-not-allowed pointer-events-none;
-  }
+}
+.base-btn--primary {
+  @apply bg-emerald-600 text-white hover:bg-emerald-500;
+}
+.base-btn--danger {
+  @apply bg-red-700 text-white hover:bg-red-600;
+}
+.base-btn--ghost {
+  @apply bg-transparent text-gray-300 border border-border hover:bg-panel;
+}
+.base-btn--disabled {
+  @apply opacity-50 cursor-not-allowed pointer-events-none;
 }
 </style>
