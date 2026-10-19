@@ -22,24 +22,22 @@ defineEmits<{ remove: [string] }>();
   </div>
 </template>
 
-<style scoped lang="scss">
+<style scoped>
+@reference "../styles/main.css";
+
 .mcp-server-card {
   @apply bg-panel border border-border rounded-md p-3 mb-2;
-
-  &__header {
-    @apply flex items-center justify-between;
-  }
-
-  &__name {
-    @apply font-semibold text-gray-100 mr-2;
-  }
-
-  &__command {
-    @apply text-xs text-gray-400;
-  }
-
-  &__actions {
-    @apply flex gap-2 mt-2;
-  }
+}
+.mcp-server-card__header {
+  @apply flex items-center justify-between;
+}
+.mcp-server-card__name {
+  @apply font-semibold text-gray-100 mr-2;
+}
+.mcp-server-card__command {
+  @apply text-xs text-gray-400;
+}
+.mcp-server-card__actions {
+  @apply flex gap-2 mt-2;
 }
 </style>
