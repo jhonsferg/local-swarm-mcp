@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jhonsferg/local-swarm-mcp/internal/backend"
@@ -20,6 +21,11 @@ type ToolCallRecord struct {
 	IsError   bool           `json:"is_error,omitempty"`
 	Timestamp time.Time      `json:"timestamp"`
 }
+
+// maxToolResultBytes caps how much of one downstream tool result is fed
+// back to the model (and kept in the transcript): a single large result
+// could otherwise overflow a small local model's context window.
+const maxToolResultBytes = 16 << 10 // 16 KiB
 
 // DefaultMaxIterations bounds an agent task's tool-call loop when the
 // caller doesn't specify one, so a model that never settles on a final
@@ -52,6 +58,7 @@ func (tr *TaskRegistry) SpawnAgent(
 	t := &task{id: id, backend: cfg.Name, status: TaskPending, startedAt: time.Now(), cancel: cancel}
 
 	tr.mu.Lock()
+	tr.pruneLocked(time.Now())
 	tr.tasks[id] = t
 	tr.mu.Unlock()
 
@@ -84,6 +91,13 @@ func (tr *TaskRegistry) runAgent(
 		tr.finish(t, "", nil, err, ctx)
 		return
 	}
+	// Only the tools actually offered to the model may be invoked: a model
+	// can name any "<server>__<tool>" it likes (hallucinated, or guessed
+	// from another server), and serverFilter must hold for those too.
+	allowed := make(map[string]bool, len(toolSpecs))
+	for _, spec := range toolSpecs {
+		allowed[spec.Function.Name] = true
+	}
 
 	var messages []backend.ChatMessage
 	if systemPrompt != "" {
@@ -112,7 +126,7 @@ func (tr *TaskRegistry) runAgent(
 		})
 
 		for _, call := range result.ToolCalls {
-			record, toolMessage := tr.invokeTool(ctx, mgr, call)
+			record, toolMessage := tr.invokeTool(ctx, mgr, allowed, call)
 			transcript = append(transcript, record)
 			messages = append(messages, toolMessage)
 		}
@@ -121,9 +135,15 @@ func (tr *TaskRegistry) runAgent(
 	tr.finish(t, "", transcript, fmt.Errorf("reached max_iterations (%d) without a final answer", maxIterations), ctx)
 }
 
-// invokeTool calls a single tool the model requested and builds both the
-// audit record and the "tool"-role message to feed back to the model.
-func (tr *TaskRegistry) invokeTool(ctx context.Context, mgr *mcpdownstream.Manager, call backend.ToolCall) (ToolCallRecord, backend.ChatMessage) {
+// invokeTool calls a single tool the model requested - refusing any tool
+// not in allowed - and builds both the audit record and the "tool"-role
+// message to feed back to the model.
+func (tr *TaskRegistry) invokeTool(ctx context.Context, mgr *mcpdownstream.Manager, allowed map[string]bool, call backend.ToolCall) (ToolCallRecord, backend.ChatMessage) {
+	if !allowed[call.Function.Name] {
+		record := ToolCallRecord{ToolName: call.Function.Name, Result: fmt.Sprintf("error: tool %q is not available to this agent", call.Function.Name), IsError: true, Timestamp: time.Now()}
+		return record, backend.ChatMessage{Role: "tool", Content: record.Result, ToolCallID: call.ID}
+	}
+
 	args, err := call.Function.ArgumentsMap()
 	if err != nil {
 		record := ToolCallRecord{ToolName: call.Function.Name, Result: fmt.Sprintf("error parsing arguments: %v", err), IsError: true, Timestamp: time.Now()}
@@ -136,9 +156,19 @@ func (tr *TaskRegistry) invokeTool(ctx context.Context, mgr *mcpdownstream.Manag
 		return record, backend.ChatMessage{Role: "tool", Content: record.Result, ToolCallID: call.ID}
 	}
 
-	text := extractText(callResult)
+	text := truncate(extractText(callResult), maxToolResultBytes)
 	record := ToolCallRecord{ToolName: call.Function.Name, Arguments: args, Result: text, IsError: callResult.IsError, Timestamp: time.Now()}
 	return record, backend.ChatMessage{Role: "tool", Content: text, ToolCallID: call.ID}
+}
+
+// truncate cuts s to at most limit bytes (on a rune boundary), noting how
+// much was dropped.
+func truncate(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := strings.ToValidUTF8(s[:limit], "")
+	return fmt.Sprintf("%s\n...[truncated %d bytes]", cut, len(s)-len(cut))
 }
 
 // extractText concatenates a CallToolResult's text content blocks.
