@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jhonsferg/local-swarm-mcp/internal/backend"
+	"github.com/jhonsferg/local-swarm-mcp/internal/config"
 	"github.com/jhonsferg/local-swarm-mcp/internal/hostregistry"
 )
 
@@ -148,5 +149,95 @@ func TestPollOnce_UnreachableHostRemovesSynthesizedBackends(t *testing.T) {
 	st, ok := hosts.StatusOf(host.Name)
 	if !ok || st.Up {
 		t.Fatalf("host status = %+v, ok=%v, want Up=false after unreachable poll", st, ok)
+	}
+}
+
+func TestUnregister_DropsDiscoveredBackends(t *testing.T) {
+	// Reproduces a confirmed bug: unregistering a host used to remove only
+	// the host record, leaving its "<host>/<model>" backends dispatchable
+	// until the process restarted.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"name":"gemma4:12b"},{"name":"qwen3.5:latest"}]}`))
+	}))
+	defer srv.Close()
+
+	hosts, err := hostregistry.Open(filepath.Join(t.TempDir(), "hosts.db"))
+	if err != nil {
+		t.Fatalf("hostregistry.Open: %v", err)
+	}
+	defer func() { _ = hosts.Close() }()
+
+	host := hostregistry.Host{Name: "rx9070", BaseURL: srv.URL}
+	if err := hosts.RegisterHost(host); err != nil {
+		t.Fatalf("RegisterHost: %v", err)
+	}
+
+	backends := backend.NewRegistry([]config.Backend{{Name: "static"}})
+	p := NewPoller(hosts, backends)
+	p.PollOnce(context.Background(), host)
+	if len(backends.List()) != 3 {
+		t.Fatalf("List() after poll = %+v, want static + 2 discovered", backends.List())
+	}
+
+	if err := p.Unregister(host.Name); err != nil {
+		t.Fatalf("Unregister: %v", err)
+	}
+
+	got := backends.List()
+	if len(got) != 1 || got[0].Name != "static" {
+		t.Fatalf("List() after Unregister = %+v, want only the static backend", got)
+	}
+	if _, ok := hosts.StatusOf(host.Name); ok {
+		t.Fatal("host status should be gone after Unregister")
+	}
+}
+
+func TestPollOnce_InFlightPollAfterUnregisterDoesNotReaddBackends(t *testing.T) {
+	// A poll that started before its host was unregistered (e.g. the
+	// background ticker's) must not re-add that host's backends - or its
+	// status entry - once it completes.
+	release := make(chan struct{})
+	started := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"name":"gemma4:12b"}]}`))
+	}))
+	defer srv.Close()
+
+	hosts, err := hostregistry.Open(filepath.Join(t.TempDir(), "hosts.db"))
+	if err != nil {
+		t.Fatalf("hostregistry.Open: %v", err)
+	}
+	defer func() { _ = hosts.Close() }()
+
+	host := hostregistry.Host{Name: "rx9070", BaseURL: srv.URL}
+	if err := hosts.RegisterHost(host); err != nil {
+		t.Fatalf("RegisterHost: %v", err)
+	}
+
+	backends := backend.NewRegistry(nil)
+	p := NewPoller(hosts, backends)
+
+	done := make(chan struct{})
+	go func() {
+		p.PollOnce(context.Background(), host)
+		close(done)
+	}()
+
+	<-started
+	if err := p.Unregister(host.Name); err != nil {
+		t.Fatalf("Unregister: %v", err)
+	}
+	close(release)
+	<-done
+
+	if got := backends.List(); len(got) != 0 {
+		t.Fatalf("List() = %+v, want no backends for an unregistered host", got)
+	}
+	if _, ok := hosts.StatusOf(host.Name); ok {
+		t.Fatal("an in-flight poll must not resurrect the unregistered host's status")
 	}
 }
