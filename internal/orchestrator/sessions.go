@@ -23,10 +23,20 @@ type SessionInfo struct {
 	MessageCount int    `json:"message_count"`
 }
 
+// DefaultMaxHistoryMessages bounds how many user/assistant messages a
+// session keeps (and resends on every turn): without a bound, a long
+// session eventually overflowed the model's context window.
+const DefaultMaxHistoryMessages = 40
+
 // SessionRegistry tracks multi-turn conversations against a backend,
 // keeping each session's history so follow-up messages carry context -
 // analogous to resuming a named agent rather than starting fresh each call.
 type SessionRegistry struct {
+	// MaxHistoryMessages is how many of the most recent history messages
+	// a session keeps; older ones are dropped a user/assistant pair at a
+	// time. The system prompt is always kept. 0 means unlimited.
+	MaxHistoryMessages int
+
 	mu       sync.Mutex
 	sessions map[string]*session
 	client   *backend.Client
@@ -36,9 +46,10 @@ type SessionRegistry struct {
 // NewSessionRegistry builds an empty SessionRegistry.
 func NewSessionRegistry(client *backend.Client, registry *backend.Registry) *SessionRegistry {
 	return &SessionRegistry{
-		sessions: make(map[string]*session),
-		client:   client,
-		registry: registry,
+		MaxHistoryMessages: DefaultMaxHistoryMessages,
+		sessions:           make(map[string]*session),
+		client:             client,
+		registry:           registry,
 	}
 }
 
@@ -102,6 +113,11 @@ func (sr *SessionRegistry) Send(ctx context.Context, id, message string, maxToke
 		backend.ChatMessage{Role: "user", Content: message},
 		backend.ChatMessage{Role: "assistant", Content: reply},
 	)
+	if limit := sr.MaxHistoryMessages; limit > 0 && len(s.history) > limit {
+		drop := len(s.history) - limit
+		drop += drop % 2 // keep user/assistant pairs intact
+		s.history = append([]backend.ChatMessage(nil), s.history[drop:]...)
+	}
 	return reply, nil
 }
 
