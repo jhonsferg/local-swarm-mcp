@@ -1,6 +1,8 @@
 package backend
 
 import (
+	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 
@@ -101,4 +103,62 @@ func TestRegistry_ConcurrentPutAndGet(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestRegistry_GetDefaultsToFirstDynamicBackendWithNoStaticOnes(t *testing.T) {
+	// A host-discovery-only setup (zero static backends) must still resolve
+	// an omitted backend name instead of failing with "no backends
+	// configured" while discovered backends exist.
+	r := NewRegistry(nil)
+	r.Put(config.Backend{Name: "rx9070/qwen3.5:latest"})
+	r.Put(config.Backend{Name: "rx9070/gemma4:12b"})
+	r.Put(config.Backend{Name: "laptop/llama3.1:8b"})
+
+	got, err := r.Get("")
+	if err != nil {
+		t.Fatalf("Get(\"\"): %v", err)
+	}
+	if got.Name != "laptop/llama3.1:8b" {
+		t.Fatalf("Get(\"\").Name = %q, want laptop/llama3.1:8b (first in name order)", got.Name)
+	}
+}
+
+func TestRegistry_ListOrdersStaticThenDynamicByName(t *testing.T) {
+	r := NewRegistry([]config.Backend{{Name: "zeta"}, {Name: "alpha"}})
+	r.Put(config.Backend{Name: "rx9070/qwen3.5:latest"})
+	r.Put(config.Backend{Name: "laptop/llama3.1:8b"})
+
+	var got []string
+	for _, b := range r.List() {
+		got = append(got, b.Name)
+	}
+	want := []string{"zeta", "alpha", "laptop/llama3.1:8b", "rx9070/qwen3.5:latest"}
+	if len(got) != len(want) {
+		t.Fatalf("List() names = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("List() names = %v, want %v", got, want)
+		}
+	}
+
+	def, err := r.Get("")
+	if err != nil {
+		t.Fatalf("Get(\"\"): %v", err)
+	}
+	if def.Name != got[0] {
+		t.Fatalf("Get(\"\") = %q, want List()[0] = %q", def.Name, got[0])
+	}
+}
+
+func TestRegistry_InfosRedactAPIKey(t *testing.T) {
+	r := NewRegistry([]config.Backend{{Name: "remote", BaseURL: "https://api.example/v1", Model: "m", APIKey: "super-secret"}})
+	infos := r.Infos()
+	if len(infos) != 1 || !infos[0].HasAPIKey || infos[0].Name != "remote" {
+		t.Fatalf("Infos() = %+v", infos)
+	}
+	data, _ := json.Marshal(infos)
+	if strings.Contains(string(data), "super-secret") {
+		t.Fatalf("Infos() JSON leaks the key: %s", data)
+	}
 }
