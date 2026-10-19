@@ -21,16 +21,16 @@ watch(lines, async () => {
   </div>
 </template>
 
-<style scoped lang="scss">
+<style scoped>
+@reference "../styles/main.css";
+
 .log-viewer {
   @apply bg-black border border-border rounded-md p-3 h-80 overflow-y-auto font-mono text-xs whitespace-pre-wrap;
-
-  &__line {
-    @apply text-gray-300;
-  }
-
-  &__empty {
-    @apply text-gray-600 italic;
-  }
+}
+.log-viewer__line {
+  @apply text-gray-300;
+}
+.log-viewer__empty {
+  @apply text-gray-600 italic;
 }
 </style>
