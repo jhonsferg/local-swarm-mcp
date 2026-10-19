@@ -9,6 +9,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -53,8 +54,21 @@ type TaskInfo struct {
 	Transcript []ToolCallRecord `json:"transcript,omitempty"`
 }
 
+// DefaultFinishedTaskTTL and DefaultMaxFinishedTasks bound how long, and
+// how many, finished tasks stay queryable before they are evicted - without
+// a bound, a long-running daemon kept every result and transcript forever.
+const (
+	DefaultFinishedTaskTTL  = time.Hour
+	DefaultMaxFinishedTasks = 500
+)
+
 // TaskRegistry tracks background tasks spawned against a backend.
 type TaskRegistry struct {
+	// FinishedTTL and MaxFinished control eviction of finished tasks (see
+	// the Default* constants); a pending or running task is never evicted.
+	FinishedTTL time.Duration
+	MaxFinished int
+
 	mu       sync.Mutex
 	tasks    map[string]*task
 	client   *backend.Client
@@ -64,9 +78,11 @@ type TaskRegistry struct {
 // NewTaskRegistry builds an empty TaskRegistry.
 func NewTaskRegistry(client *backend.Client, registry *backend.Registry) *TaskRegistry {
 	return &TaskRegistry{
-		tasks:    make(map[string]*task),
-		client:   client,
-		registry: registry,
+		FinishedTTL: DefaultFinishedTaskTTL,
+		MaxFinished: DefaultMaxFinishedTasks,
+		tasks:       make(map[string]*task),
+		client:      client,
+		registry:    registry,
 	}
 }
 
@@ -83,6 +99,7 @@ func (tr *TaskRegistry) Spawn(backendName, systemPrompt, prompt string, maxToken
 	t := &task{id: id, backend: cfg.Name, status: TaskPending, startedAt: time.Now(), cancel: cancel}
 
 	tr.mu.Lock()
+	tr.pruneLocked(time.Now())
 	tr.tasks[id] = t
 	tr.mu.Unlock()
 
@@ -130,6 +147,32 @@ func (tr *TaskRegistry) finish(t *task, result string, transcript []ToolCallReco
 	default:
 		t.status = TaskCompleted
 		t.result = result
+	}
+	// Release the task's context now that it's done (the status above
+	// already used ctx.Err() to tell cancellation from failure).
+	t.cancel()
+}
+
+// pruneLocked evicts finished tasks older than FinishedTTL, then the oldest
+// finished ones beyond MaxFinished. Callers must hold tr.mu.
+func (tr *TaskRegistry) pruneLocked(now time.Time) {
+	var finished []*task
+	for id, t := range tr.tasks {
+		if t.finishedAt.IsZero() {
+			continue
+		}
+		if tr.FinishedTTL > 0 && now.Sub(t.finishedAt) > tr.FinishedTTL {
+			delete(tr.tasks, id)
+			continue
+		}
+		finished = append(finished, t)
+	}
+	if tr.MaxFinished <= 0 || len(finished) <= tr.MaxFinished {
+		return
+	}
+	sort.Slice(finished, func(i, j int) bool { return finished[i].finishedAt.Before(finished[j].finishedAt) })
+	for _, t := range finished[:len(finished)-tr.MaxFinished] {
+		delete(tr.tasks, t.id)
 	}
 }
 
