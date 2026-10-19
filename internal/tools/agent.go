@@ -22,10 +22,10 @@ func SpawnAgentTaskTool() mcp.Tool {
 		mcp.WithString("prompt", mcp.Required(), mcp.Description("The task/prompt to send")),
 		mcp.WithString("backend", mcp.Description("Backend name to use; omit to use the first configured backend. Must be a tool-calling-capable model.")),
 		mcp.WithString("system_prompt", mcp.Description("Optional system prompt")),
-		mcp.WithArray("mcp_servers", mcp.Description("Names of configured downstream MCP servers whose tools this agent may use; omit to allow all configured servers")),
+		mcp.WithArray("mcp_servers", mcp.WithStringItems(), mcp.Description("Names of configured downstream MCP servers whose tools this agent may use; omit to allow all configured servers. Enforced: a call to any tool outside this set is refused")),
 		mcp.WithNumber("max_iterations", mcp.DefaultNumber(float64(orchestrator.DefaultMaxIterations)), mcp.Description("Maximum tool-call round-trips before giving up")),
 		mcp.WithNumber("max_tokens", mcp.DefaultNumber(1024), mcp.Description("Maximum tokens to generate per completion")),
-		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature")),
+		mcp.WithNumber("temperature", mcp.DefaultNumber(0.2), mcp.Description("Sampling temperature; 0 for deterministic output")),
 		mcp.WithNumber("top_p", mcp.Description("Nucleus sampling threshold (0-1); omit to use the backend's own default")),
 	)
 }
@@ -57,7 +57,7 @@ func (a *Agents) SpawnAgentTaskHandler(_ context.Context, req mcp.CallToolReques
 func ListAvailableAgentToolsTool() mcp.Tool {
 	return mcp.NewTool("list_available_agent_tools",
 		mcp.WithDescription("List every tool discovered from configured downstream MCP servers, namespaced as <server>__<tool>, that a spawn_agent_task call could invoke. Check this before spawning an agent to know what it can actually do."),
-		mcp.WithArray("mcp_servers", mcp.Description("Restrict the listing to these downstream server names; omit to list all configured servers")),
+		mcp.WithArray("mcp_servers", mcp.WithStringItems(), mcp.Description("Restrict the listing to these downstream server names; omit to list all configured servers")),
 	)
 }
 
