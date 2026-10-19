@@ -2,7 +2,7 @@ export interface Backend {
   name: string;
   base_url: string;
   model: string;
-  has_api_key?: boolean;
+  has_api_key: boolean;
 }
 
 export interface DiscoveredModel {
@@ -15,9 +15,7 @@ export interface DiscoveredModel {
 export interface HostStatus {
   name: string;
   base_url: string;
-  has_api_key?: boolean;
-  /** @deprecated never sent by the daemon any more; kept until HostCard stops reading it. */
-  api_key?: string;
+  has_api_key: boolean;
   models: DiscoveredModel[] | null;
   up: boolean;
   last_seen: string;
@@ -34,6 +32,6 @@ export interface MCPServerStatus {
 export interface HealthResponse {
   service: string;
   version: string;
-  command_registration?: boolean;
-  auth_required?: boolean;
+  command_registration: boolean;
+  auth_required: boolean;
 }
