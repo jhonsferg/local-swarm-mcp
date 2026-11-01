@@ -3,7 +3,7 @@ module github.com/jhonsferg/local-swarm-mcp
 go 1.27.0
 
 require (
-	github.com/mark3labs/mcp-go v1.3.0
+	github.com/mark3labs/mcp-go v1.4.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/sys v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
